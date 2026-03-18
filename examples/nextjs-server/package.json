@@ -1,0 +1,27 @@
+{
+  "name": "x402-nextjs-example",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "vercel-build": "cd ../.. && pnpm install --no-frozen-lockfile && pnpm -r build",
+    "start": "next start"
+  },
+  "dependencies": {
+    "@ton-x402/core": "workspace:*",
+    "@ton-x402/middleware": "workspace:*",
+    "@ton-x402/facilitator": "workspace:*",
+    "next": "^15.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "@ton/core": "^0.62.0",
+    "@ton/ton": "^15.0.0",
+    "@ton/crypto": "^3.3.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "typescript": "^5.7.0"
+  }
+}

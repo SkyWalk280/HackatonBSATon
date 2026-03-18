@@ -1,0 +1,23 @@
+{
+  "name": "x402-client-example",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "pay": "tsx --env-file=../nextjs-server/.env.local src/pay.ts",
+    "pay:joke": "RESOURCE_URL=http://localhost:3000/api/joke tsx --env-file=../nextjs-server/.env.local src/pay.ts",
+    "address": "tsx src/address-formats.ts"
+  },
+  "dependencies": {
+    "@ton-x402/client": "workspace:*",
+    "@ton-x402/core": "workspace:*",
+    "@ton/core": "^0.62.0",
+    "@ton/crypto": "^3.3.0",
+    "@ton/ton": "^15.0.0",
+    "tsx": "^4.0.0",
+    "undici": "^7.22.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}

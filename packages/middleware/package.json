@@ -1,0 +1,21 @@
+{
+  "name": "@ton-x402/middleware",
+  "version": "0.1.0",
+  "description": "x402 payment middleware for resource servers (Next.js / Vercel / generic HTTP)",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc"
+  },
+  "dependencies": {
+    "@ton-x402/core": "workspace:*"
+  },
+  "license": "MIT"
+}

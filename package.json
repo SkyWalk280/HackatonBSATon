@@ -1,0 +1,32 @@
+{
+  "name": "ton-x402",
+  "version": "0.1.0",
+  "private": true,
+  "description": "x402 (HTTP 402 Payment Required) protocol implementation for TON blockchain",
+  "workspaces": [
+    "packages/*",
+    "examples/*"
+  ],
+  "scripts": {
+    "dev": "pnpm dev:server",
+    "dev:server": "pnpm --filter x402-nextjs-example dev",
+    "start:server": "pnpm --filter x402-nextjs-example start",
+    "dev:client": "pnpm --filter x402-client-example pay",
+    "dev:client:joke": "pnpm --filter x402-client-example pay:joke",
+    "address": "pnpm --filter x402-client-example address --",
+    "build": "pnpm --filter './packages/**' -r build",
+    "clean": "rm -rf packages/*/dist",
+    "typecheck": "pnpm -r exec tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^22.15.29",
+    "typescript": "^5.8.3"
+  },
+  "dependencies": {
+    "@ton-community/assets-sdk": "^0.0.5"
+  }
+}

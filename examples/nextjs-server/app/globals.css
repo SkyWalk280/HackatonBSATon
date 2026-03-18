@@ -1,0 +1,83 @@
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Manrope:wght@400;500;600;700&display=swap');
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+:root {
+  --ton-blue: #0098EA;
+  --ton-blue-dim: rgba(0, 152, 234, 0.15);
+  --ton-blue-hover: #0085cc;
+
+  --bg: #0E1117;
+  --bg-card: #161B25;
+  --bg-card-2: #1E2535;
+  --border: rgba(255,255,255,0.08);
+  --border-active: rgba(0, 152, 234, 0.4);
+
+  --text-primary: #E8ECF2;
+  --text-secondary: rgba(232, 236, 242, 0.55);
+  --text-muted: rgba(232, 236, 242, 0.3);
+
+  --success: #39C688;
+  --error: #FF5C5C;
+  --warning: #FFA940;
+
+  --radius: 14px;
+  --radius-sm: 8px;
+  --font-mono: 'JetBrains Mono', monospace;
+  --font-sans: 'Manrope', sans-serif;
+}
+
+/* Telegram sets CSS variables on var(--tg-theme-*) — we respect those if present */
+@supports (--tg-theme-bg-color: #000) {
+  :root {
+    --bg: var(--tg-theme-bg-color, #0E1117);
+    --text-primary: var(--tg-theme-text-color, #E8ECF2);
+  }
+}
+
+html, body {
+  height: 100%;
+  background-color: var(--bg);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+/* Utility */
+.mono { font-family: var(--font-mono); }
+
+/* Keyframes */
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes pulse-border {
+  0%, 100% { border-color: var(--border-active); }
+  50%       { border-color: rgba(0, 152, 234, 0.15); }
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position:  200% 0; }
+}
+
+.animate-fade-up {
+  animation: fade-up 0.45s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
