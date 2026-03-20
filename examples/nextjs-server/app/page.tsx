@@ -1,492 +1,246 @@
 "use client";
-/*
-  This file is the MAIN PAGE of your Telegram Mini App.
-  It's a "use client" component because it needs to:
-    1. Access window.Telegram.WebApp (the Telegram SDK)
-    2. Make API calls to your /api/joke endpoint
-    3. Handle payment flow state
-
-  HOW THE PAYMENT FLOW WORKS:
-    1. User clicks "Get Joke"
-    2. Your server returns HTTP 402 with payment instructions
-    3. The client needs to sign a TON transaction and retry with the payment header
-    4. Server verifies via the facilitator and returns the joke
-    
-  For this hackathon demo, we show the raw 402 response so you can see it working.
-  To do full auto-payment, you'd integrate @ton-x402/client (or build the signing logic).
-*/
 
 import { useEffect, useState, useCallback } from "react";
+import { TonConnectButton, useTonWallet } from "@tonconnect/ui-react";
+import { usePayment } from "./hooks/usePayment";
 
-// ---- Types ----
 interface TelegramUser {
   id: number;
   first_name: string;
   last_name?: string;
   username?: string;
-  photo_url?: string;
 }
 
-interface JokeResponse {
-  joke: string;
-  timestamp: string;
-}
-
-interface PaymentRequired {
-  version: number;
-  accepts: Array<{
-    amount: string;
-    asset: string;
-    description: string;
-  }>;
-}
-
-type Status = "idle" | "loading" | "success" | "payment_required" | "error";
-
-// ---- Component ----
 export default function Page() {
-  const [user, setUser] = useState<TelegramUser | null>(null);
-  const [status, setStatus] = useState<Status>("idle");
-  const [joke, setJoke] = useState<JokeResponse | null>(null);
-  const [paymentInfo, setPaymentInfo] = useState<PaymentRequired | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [count, setCount] = useState(0);
+  const wallet = useTonWallet();
+  const [tgUser, setTgUser] = useState<TelegramUser | null>(null);
+  const [joke, setJoke] = useState<{ joke: string; timestamp: string } | null>(null);
+  const [fact, setFact] = useState<{ fact: string; timestamp: string } | null>(null);
+  const [totalPaid, setTotalPaid] = useState(0);
+  const [activeTab, setActiveTab] = useState<"joke" | "fact">("joke");
 
-  // ── On mount: initialise Telegram Web App ──
   useEffect(() => {
     const tg = (window as any).Telegram?.WebApp;
     if (tg) {
-      tg.ready();           // tells Telegram the app is ready
-      tg.expand();          // expands to full screen
-      tg.setHeaderColor("#0E1117");
-      tg.setBackgroundColor("#0E1117");
-
-      // Get user info from Telegram
-      const initData = tg.initDataUnsafe;
-      if (initData?.user) {
-        setUser(initData.user);
-      }
+      tg.ready();
+      tg.expand();
+      tg.setHeaderColor("#0A0F1A");
+      tg.setBackgroundColor("#0A0F1A");
+      if (tg.initDataUnsafe?.user) setTgUser(tg.initDataUnsafe.user);
     }
   }, []);
 
-  // ── Fetch joke (calls your paid API endpoint) ──
-  const fetchJoke = useCallback(async (paymentHeader?: string) => {
-    setStatus("loading");
-    setError(null);
-    setJoke(null);
-    setPaymentInfo(null);
+  const jokePayment = usePayment({
+    endpoint: "/api/joke",
+    onSuccess: useCallback((data: any) => {
+      setJoke(data);
+      setTotalPaid((s) => s + 0.01);
+    }, []),
+  });
 
-    try {
-      const headers: Record<string, string> = {
-        "Content-Type": "application/json",
-      };
+  const factPayment = usePayment({
+    endpoint: "/api/fact",
+    onSuccess: useCallback((data: any) => {
+      setFact(data);
+      setTotalPaid((s) => s + 0.005);
+    }, []),
+  });
 
-      // If you have a payment header from the previous 402 response, attach it.
-      // In a full integration, this header contains the signed TON transaction.
-      if (paymentHeader) {
-        headers["X-PAYMENT"] = paymentHeader;
-      }
+  const active = activeTab === "joke" ? jokePayment : factPayment;
+  const isLoading = ["loading","payment_required","waiting_wallet","verifying"].includes(active.status);
 
-      const res = await fetch("/api/joke", { headers });
+  const statusLabel: Record<string, string> = {
+    idle: activeTab === "joke" ? "Get Joke · 0.01 BSA USD" : "Get Fact · 0.005 BSA USD",
+    loading: "Calling server...",
+    payment_required: "Building transaction...",
+    waiting_wallet: "Approve in Tonkeeper...",
+    verifying: "Verifying on-chain...",
+    success: "Get another!",
+    error: "Try again",
+  };
 
-      if (res.ok) {
-        // ✅ Payment verified — we got the joke!
-        const data: JokeResponse = await res.json();
-        setJoke(data);
-        setStatus("success");
-        setCount((c) => c + 1);
-      } else if (res.status === 402) {
-        // 💳 Server wants payment first
-        // The response body contains what to pay, to whom, and how much
-        const data = await res.json();
-        setPaymentInfo(data);
-        setStatus("payment_required");
-      } else {
-        throw new Error(`Server returned ${res.status}`);
-      }
-    } catch (err: any) {
-      setStatus("error");
-      setError(err.message ?? "Something went wrong");
-    }
-  }, []);
-
-  // ── Render ──
   return (
-    <main
-      style={{
-        minHeight: "100vh",
-        background: "var(--bg)",
-        padding: "0",
-        display: "flex",
-        flexDirection: "column",
-      }}
-    >
-      {/* ─── Header ─── */}
-      <header
-        style={{
-          padding: "24px 20px 16px",
-          borderBottom: "1px solid var(--border)",
-          background: "var(--bg-card)",
-        }}
-        className="animate-fade-up"
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 4 }}>
-          {/* TON logo */}
-          <div
-            style={{
-              width: 36,
-              height: 36,
-              borderRadius: "50%",
-              background: "var(--ton-blue)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              flexShrink: 0,
-            }}
-          >
-            <svg width="20" height="20" viewBox="0 0 56 56" fill="none">
-              <path
-                d="M28 4L4 16V28C4 41.25 14.75 52.5 28 54C41.25 52.5 52 41.25 52 28V16L28 4Z"
-                fill="white"
-                fillOpacity="0.9"
-              />
-              <path
-                d="M20 26L28 18L36 26M28 18V38"
-                stroke="#0098EA"
-                strokeWidth="3.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
+    <main style={s.main}>
+      <header style={s.header}>
+        <div style={s.headerRow}>
+          <div style={s.logoRow}>
+            <TonBadge />
+            <div>
+              <div style={s.title}>TON x402 Demo</div>
+              <div style={s.subtitle}>Pay-per-request · testnet</div>
+            </div>
           </div>
-          <div>
-            <h1
-              style={{
-                fontSize: 18,
-                fontWeight: 700,
-                color: "var(--text-primary)",
-                lineHeight: 1.2,
-                fontFamily: "var(--font-sans)",
-              }}
-            >
-              TON x402 Demo
-            </h1>
-            <p style={{ fontSize: 12, color: "var(--text-secondary)", marginTop: 1 }}>
-              Pay per joke · testnet
-            </p>
-          </div>
+          <TonConnectButton />
         </div>
-
-        {/* User greeting */}
-        {user && (
-          <div
-            style={{
-              marginTop: 12,
-              padding: "8px 12px",
-              background: "var(--ton-blue-dim)",
-              borderRadius: "var(--radius-sm)",
-              border: "1px solid var(--border-active)",
-              fontSize: 13,
-              color: "var(--text-secondary)",
-              fontFamily: "var(--font-mono)",
-            }}
-          >
-            👤 {user.first_name}
-            {user.last_name ? ` ${user.last_name}` : ""}
-            {user.username ? ` · @${user.username}` : ""}
-            <span style={{ color: "var(--text-muted)", marginLeft: 8 }}>
-              id:{user.id}
+        {tgUser && (
+          <div style={s.userRow}>
+            <span>👤</span>
+            <span style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}>
+              {tgUser.first_name}{tgUser.username ? ` · @${tgUser.username}` : ""}
+            </span>
+            <span style={{ color: "var(--text-muted)", marginLeft: "auto", fontSize: 11 }}>
+              id:{tgUser.id}
             </span>
           </div>
         )}
       </header>
 
-      {/* ─── Body ─── */}
-      <div
-        style={{
-          flex: 1,
-          padding: "20px",
-          display: "flex",
-          flexDirection: "column",
-          gap: 16,
-        }}
-      >
-
-        {/* Stats row */}
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "1fr 1fr",
-            gap: 10,
-          }}
-          className="animate-fade-up"
-        >
-          <StatCard label="Jokes fetched" value={count.toString()} />
-          <StatCard label="Network" value="Testnet" accent />
+      <div style={s.body}>
+        <div style={s.row}>
+          <Stat label="Wallet" value={wallet ? "Connected ✓" : "Not connected"} blue={!!wallet} />
+          <Stat label="Total spent" value={`${totalPaid.toFixed(3)} BSA`} />
         </div>
 
-        {/* Main action card */}
-        <div
-          className="animate-fade-up"
-          style={{
-            background: "var(--bg-card)",
-            border: "1px solid var(--border)",
-            borderRadius: "var(--radius)",
-            padding: 20,
-            animationDelay: "0.05s",
-          }}
-        >
-          <p
-            style={{
-              fontSize: 13,
-              color: "var(--text-secondary)",
-              marginBottom: 16,
-              lineHeight: 1.7,
-            }}
-          >
-            Each joke costs <strong style={{ color: "var(--ton-blue)" }}>0.01 BSA USD</strong> (Jetton on TON testnet).
-            Clicking the button calls <code style={{ fontFamily: "var(--font-mono)", fontSize: 12, background: "rgba(255,255,255,0.06)", padding: "1px 5px", borderRadius: 4 }}>/api/joke</code>. 
-            If unpaid, you'll see the <strong style={{ color: "var(--warning)" }}>402 Payment Required</strong> response from the server.
+        <div style={s.tabs}>
+          {(["joke","fact"] as const).map((t) => (
+            <button key={t} style={{ ...s.tab, ...(activeTab === t ? s.tabOn : {}) }} onClick={() => setActiveTab(t)}>
+              {t === "joke" ? "🎲 Jokes" : "💡 Facts"}
+              <span style={s.pill}>{t === "joke" ? "0.01" : "0.005"}</span>
+            </button>
+          ))}
+        </div>
+
+        <div style={s.card}>
+          <p style={s.desc}>
+            {activeTab === "joke"
+              ? "Each joke costs 0.01 BSA USD. Your wallet signs a Jetton transfer, the server verifies it via the BSA facilitator, then returns your joke."
+              : "Each fact costs 0.005 BSA USD. Same x402 flow — just a different endpoint and a lower price."}
           </p>
 
+          {!wallet && (
+            <div style={s.warn}>⚠ Connect your TON wallet above first (use Tonkeeper, switch to testnet)</div>
+          )}
+
           <button
-            onClick={() => fetchJoke()}
-            disabled={status === "loading"}
-            style={{
-              width: "100%",
-              padding: "14px 20px",
-              background: status === "loading" ? "var(--ton-blue-dim)" : "var(--ton-blue)",
-              border: "none",
-              borderRadius: "var(--radius-sm)",
-              color: "#fff",
-              fontSize: 15,
-              fontWeight: 600,
-              fontFamily: "var(--font-sans)",
-              cursor: status === "loading" ? "not-allowed" : "pointer",
-              transition: "background 0.2s, transform 0.1s",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 8,
-            }}
-            onMouseDown={(e) => {
-              (e.currentTarget as HTMLButtonElement).style.transform = "scale(0.98)";
-            }}
-            onMouseUp={(e) => {
-              (e.currentTarget as HTMLButtonElement).style.transform = "scale(1)";
-            }}
+            onClick={active.execute}
+            disabled={isLoading || !wallet}
+            style={{ ...s.btn, ...(isLoading || !wallet ? s.btnOff : {}) }}
           >
-            {status === "loading" ? (
-              <>
-                <Spinner />
-                Sending request...
-              </>
-            ) : (
-              <>🎲 Get a Joke (costs 0.01 BSA USD)</>
-            )}
+            {isLoading ? <><Spin /> {statusLabel[active.status]}</> : (statusLabel[active.status] || statusLabel.idle)}
           </button>
+
+          {isLoading && (
+            <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid var(--border)" }}>
+              {[
+                ["loading",          "Calling /api/" + activeTab],
+                ["payment_required", "Got 402 · building Jetton tx"],
+                ["waiting_wallet",   "Waiting for Tonkeeper approval"],
+                ["verifying",        "Verifying with facilitator"],
+              ].map(([key, label]) => {
+                const statuses = ["loading","payment_required","waiting_wallet","verifying","success"];
+                const currentIdx = statuses.indexOf(active.status);
+                const thisIdx = statuses.indexOf(key);
+                return (
+                  <div key={key} style={{ display:"flex", alignItems:"center", gap:8, padding:"3px 0" }}>
+                    <div style={{
+                      width:16, height:16, borderRadius:"50%", flexShrink:0,
+                      background: currentIdx > thisIdx ? "var(--success)" : currentIdx === thisIdx ? "var(--ton-blue)" : "var(--border)",
+                      display:"flex", alignItems:"center", justifyContent:"center",
+                      fontSize:9, color:"#fff", transition:"background 0.3s",
+                    }}>
+                      {currentIdx > thisIdx ? "✓" : ""}
+                    </div>
+                    <span style={{ fontSize:12, color: currentIdx >= thisIdx ? "var(--text-primary)" : "var(--text-muted)" }}>
+                      {label}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
 
-        {/* Result: Payment Required (402) */}
-        {status === "payment_required" && paymentInfo && (
-          <div
-            className="animate-fade-up"
-            style={{
-              background: "rgba(255, 169, 64, 0.08)",
-              border: "1px solid rgba(255, 169, 64, 0.3)",
-              borderRadius: "var(--radius)",
-              padding: 18,
-              animationDelay: "0s",
-            }}
-          >
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-              <span style={{ fontSize: 18 }}>💳</span>
-              <span style={{ fontWeight: 600, color: "var(--warning)", fontSize: 14 }}>
-                402 — Payment Required
-              </span>
+        {active.status === "success" && (activeTab === "joke" ? joke : fact) && (
+          <div style={s.result}>
+            <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:10 }}>
+              <span style={{ color:"var(--success)", fontWeight:600, fontSize:13 }}>✓ Payment verified</span>
             </div>
-            <p style={{ fontSize: 13, color: "var(--text-secondary)", marginBottom: 12 }}>
-              Your server is working correctly! It returned a 402 response. In a full integration, 
-              the client would sign a TON transaction and retry with it attached.
+            <p style={{ fontSize:15, color:"var(--text-primary)", lineHeight:1.7, marginBottom:6 }}>
+              {activeTab === "joke" ? joke?.joke : (fact as any)?.fact}
             </p>
-            <div
-              style={{
-                background: "var(--bg)",
-                borderRadius: "var(--radius-sm)",
-                padding: 12,
-                fontFamily: "var(--font-mono)",
-                fontSize: 11,
-                color: "var(--text-muted)",
-                overflowX: "auto",
-                whiteSpace: "pre-wrap",
-                wordBreak: "break-all",
-              }}
-            >
-              {JSON.stringify(paymentInfo, null, 2)}
-            </div>
-          </div>
-        )}
-
-        {/* Result: Success */}
-        {status === "success" && joke && (
-          <div
-            className="animate-fade-up"
-            style={{
-              background: "rgba(57, 198, 136, 0.08)",
-              border: "1px solid rgba(57, 198, 136, 0.3)",
-              borderRadius: "var(--radius)",
-              padding: 20,
-            }}
-          >
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
-              <span style={{ fontSize: 18 }}>✅</span>
-              <span style={{ fontWeight: 600, color: "var(--success)", fontSize: 14 }}>
-                Payment verified — here's your joke
-              </span>
-            </div>
-            <p
-              style={{
-                fontSize: 16,
-                color: "var(--text-primary)",
-                lineHeight: 1.7,
-                marginBottom: 10,
-              }}
-            >
-              {joke.joke}
-            </p>
-            <p
-              style={{
-                fontSize: 11,
-                color: "var(--text-muted)",
-                fontFamily: "var(--font-mono)",
-              }}
-            >
-              {new Date(joke.timestamp).toLocaleTimeString()}
+            <p style={{ fontSize:11, color:"var(--text-muted)", fontFamily:"var(--font-mono)" }}>
+              {new Date((activeTab === "joke" ? joke?.timestamp : (fact as any)?.timestamp) || "").toLocaleTimeString()}
             </p>
           </div>
         )}
 
-        {/* Result: Error */}
-        {status === "error" && error && (
-          <div
-            className="animate-fade-up"
-            style={{
-              background: "rgba(255, 92, 92, 0.08)",
-              border: "1px solid rgba(255, 92, 92, 0.3)",
-              borderRadius: "var(--radius)",
-              padding: 16,
-            }}
-          >
-            <span style={{ fontSize: 14, color: "var(--error)" }}>⚠ {error}</span>
-          </div>
+        {active.status === "error" && active.error && (
+          <div style={s.err}>⚠ {active.error}</div>
         )}
 
-        {/* Info section */}
-        <div
-          className="animate-fade-up"
-          style={{
-            background: "var(--bg-card)",
-            border: "1px solid var(--border)",
-            borderRadius: "var(--radius)",
-            padding: 16,
-            animationDelay: "0.1s",
-          }}
-        >
-          <h2
-            style={{
-              fontSize: 13,
-              fontWeight: 600,
-              color: "var(--text-secondary)",
-              marginBottom: 10,
-              textTransform: "uppercase",
-              letterSpacing: "0.06em",
-            }}
-          >
-            Env config
-          </h2>
-          <ConfigRow label="Network" value={process.env.NEXT_PUBLIC_TON_NETWORK || "testnet"} />
-          <ConfigRow label="Jetton" value="kQCd6G7...PnW" mono />
-          <ConfigRow label="Facilitator" value="BSA Vercel" />
+        <div style={s.card}>
+          <div style={s.sectionLabel}>How x402 works</div>
+          {[
+            ["1", "GET /api/joke",       "No payment → server returns HTTP 402"],
+            ["2", "Read 402 body",       "Contains: amount, asset, destination address"],
+            ["3", "Build Jetton tx",     "Sign transfer in Tonkeeper wallet"],
+            ["4", "Retry with X-PAYMENT","Attach signed BOC as request header"],
+            ["5", "Facilitator verifies","Checks TON chain via BSA Vercel server"],
+            ["6", "Joke returned ✓",     "Server confirms and responds with data"],
+          ].map(([n, label, sub]) => (
+            <div key={n} style={{ display:"flex", gap:10, padding:"7px 0", borderBottom:"1px solid var(--border)" }}>
+              <div style={{
+                width:20, height:20, borderRadius:"50%", flexShrink:0, marginTop:1,
+                background:"var(--ton-blue-dim)", border:"1px solid var(--border-active)",
+                display:"flex", alignItems:"center", justifyContent:"center",
+                fontSize:10, color:"var(--ton-blue)", fontFamily:"var(--font-mono)", fontWeight:700,
+              }}>{n}</div>
+              <div>
+                <div style={{ fontSize:13, color:"var(--text-primary)", fontWeight:500 }}>{label}</div>
+                <div style={{ fontSize:11, color:"var(--text-muted)", marginTop:1 }}>{sub}</div>
+              </div>
+            </div>
+          ))}
         </div>
       </div>
     </main>
   );
 }
 
-// ─── Sub-components ───
-
-function StatCard({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
+function Stat({ label, value, blue }: { label:string; value:string; blue?:boolean }) {
   return (
-    <div
-      style={{
-        background: accent ? "var(--ton-blue-dim)" : "var(--bg-card)",
-        border: `1px solid ${accent ? "var(--border-active)" : "var(--border)"}`,
-        borderRadius: "var(--radius-sm)",
-        padding: "12px 14px",
-      }}
-    >
-      <div
-        style={{
-          fontSize: 11,
-          color: "var(--text-muted)",
-          textTransform: "uppercase",
-          letterSpacing: "0.06em",
-          marginBottom: 4,
-        }}
-      >
-        {label}
-      </div>
-      <div
-        style={{
-          fontSize: 22,
-          fontWeight: 700,
-          color: accent ? "var(--ton-blue)" : "var(--text-primary)",
-          fontFamily: "var(--font-mono)",
-        }}
-      >
-        {value}
-      </div>
+    <div style={{ flex:1, background: blue ? "var(--ton-blue-dim)" : "var(--bg-card)", border:`1px solid ${blue ? "var(--border-active)" : "var(--border)"}`, borderRadius:10, padding:"10px 12px" }}>
+      <div style={{ fontSize:10, color:"var(--text-muted)", textTransform:"uppercase", letterSpacing:"0.07em", marginBottom:3 }}>{label}</div>
+      <div style={{ fontSize:14, fontWeight:700, color: blue ? "var(--ton-blue)" : "var(--text-primary)", fontFamily:"var(--font-mono)" }}>{value}</div>
     </div>
   );
 }
 
-function ConfigRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+function TonBadge() {
   return (
-    <div
-      style={{
-        display: "flex",
-        justifyContent: "space-between",
-        alignItems: "center",
-        padding: "6px 0",
-        borderBottom: "1px solid var(--border)",
-        fontSize: 12,
-      }}
-    >
-      <span style={{ color: "var(--text-muted)" }}>{label}</span>
-      <span
-        style={{
-          color: "var(--text-secondary)",
-          fontFamily: mono ? "var(--font-mono)" : "var(--font-sans)",
-          fontSize: mono ? 11 : 12,
-        }}
-      >
-        {value}
-      </span>
+    <div style={{ width:34, height:34, borderRadius:"50%", background:"var(--ton-blue)", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>
+      <svg width="18" height="18" viewBox="0 0 56 56" fill="none">
+        <path d="M28 4L4 16V28C4 41.25 14.75 52.5 28 54C41.25 52.5 52 41.25 52 28V16L28 4Z" fill="white" fillOpacity="0.9"/>
+        <path d="M20 26L28 18L36 26M28 18V38" stroke="#0098EA" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round"/>
+      </svg>
     </div>
   );
 }
 
-function Spinner() {
-  return (
-    <div
-      style={{
-        width: 16,
-        height: 16,
-        border: "2px solid rgba(255,255,255,0.3)",
-        borderTopColor: "#fff",
-        borderRadius: "50%",
-        animation: "spin 0.7s linear infinite",
-      }}
-    />
-  );
+function Spin({ size = 13 }: { size?: number }) {
+  return <div style={{ width:size, height:size, border:`${size<12?1.5:2}px solid rgba(255,255,255,0.3)`, borderTopColor:"#fff", borderRadius:"50%", animation:"spin 0.7s linear infinite", display:"inline-block", flexShrink:0 }} />;
 }
+
+const s: Record<string, React.CSSProperties> = {
+  main: { minHeight:"100vh", background:"var(--bg)", display:"flex", flexDirection:"column" },
+  header: { padding:"14px 16px 12px", background:"var(--bg-card)", borderBottom:"1px solid var(--border)" },
+  headerRow: { display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:10 },
+  logoRow: { display:"flex", alignItems:"center", gap:10 },
+  title: { fontSize:15, fontWeight:700, color:"var(--text-primary)", lineHeight:1.2 },
+  subtitle: { fontSize:11, color:"var(--text-secondary)", marginTop:1 },
+  userRow: { display:"flex", alignItems:"center", gap:6, background:"var(--ton-blue-dim)", border:"1px solid var(--border-active)", borderRadius:8, padding:"5px 10px", color:"var(--text-secondary)" },
+  body: { display:"flex", flexDirection:"column", gap:12, padding:"12px 16px 24px" },
+  row: { display:"flex", gap:10 },
+  tabs: { display:"flex", gap:8 },
+  tab: { flex:1, padding:"9px 0", borderRadius:10, border:"1px solid var(--border)", background:"var(--bg-card)", color:"var(--text-secondary)", fontSize:13, fontWeight:500, cursor:"pointer", fontFamily:"var(--font-sans)", display:"flex", alignItems:"center", justifyContent:"center", gap:6, transition:"all 0.15s" },
+  tabOn: { background:"var(--ton-blue-dim)", border:"1px solid var(--border-active)", color:"var(--text-primary)" },
+  pill: { fontSize:10, color:"var(--ton-blue)", background:"rgba(0,152,234,0.15)", padding:"1px 5px", borderRadius:4, fontFamily:"var(--font-mono)" },
+  card: { background:"var(--bg-card)", border:"1px solid var(--border)", borderRadius:14, padding:16 },
+  desc: { fontSize:13, color:"var(--text-secondary)", lineHeight:1.7, marginBottom:12 },
+  warn: { background:"rgba(255,169,64,0.08)", border:"1px solid rgba(255,169,64,0.25)", borderRadius:8, padding:"8px 12px", fontSize:12, color:"var(--warning)", marginBottom:12 },
+  btn: { width:"100%", padding:"13px 16px", background:"var(--ton-blue)", border:"none", borderRadius:10, color:"#fff", fontSize:14, fontWeight:600, fontFamily:"var(--font-sans)", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:8 },
+  btnOff: { background:"var(--ton-blue-dim)", cursor:"not-allowed", color:"rgba(255,255,255,0.35)" },
+  result: { background:"rgba(57,198,136,0.07)", border:"1px solid rgba(57,198,136,0.25)", borderRadius:14, padding:16 },
+  err: { background:"rgba(255,92,92,0.08)", border:"1px solid rgba(255,92,92,0.25)", borderRadius:10, padding:"12px 16px", fontSize:13, color:"var(--error)" },
+  sectionLabel: { fontSize:10, fontWeight:600, color:"var(--text-muted)", textTransform:"uppercase", letterSpacing:"0.07em", marginBottom:8 },
+};
