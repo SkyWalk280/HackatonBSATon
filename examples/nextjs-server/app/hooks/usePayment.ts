@@ -43,9 +43,8 @@ export function usePayment({ endpoint, onSuccess }: UsePaymentOptions) {
     setError(null);
 
     try {
-      // Step 1: call the API with no payment
+      // Step 1: call the API normally
       const firstRes = await fetch(endpoint);
-
       if (firstRes.ok) {
         const data = await firstRes.json();
         onSuccess(data);
@@ -57,35 +56,40 @@ export function usePayment({ endpoint, onSuccess }: UsePaymentOptions) {
         throw new Error(`Unexpected status: ${firstRes.status}`);
       }
 
-      // Step 2: read the 402 payment instructions
+      // Step 2: get payment instructions
       const paymentRequired: PaymentRequiredBody = await firstRes.json();
       setPaymentInfo(paymentRequired);
       setStatus("payment_required");
 
       if (!wallet) throw new Error("Please connect your TON wallet first");
-
       const accept = paymentRequired.accepts[0];
       if (!accept) throw new Error("No payment options in 402 response");
 
-      // Step 3: build the Jetton transfer transaction
-      const jettonPayload = beginCell()
-        .storeUint(0xf8a7ea5, 32)
-        .storeUint(0, 64)
-        .storeCoins(BigInt(accept.amount))
-        .storeAddress(Address.parse(accept.payTo))
-        .storeAddress(Address.parse(wallet.account.address))
-        .storeBit(0)
-        .storeCoins(toNano("0.01"))
-        .storeBit(0)
-        .endCell();
+      // Step 3: generate queryId for the facilitator
+      const queryId = BigInt(Date.now()) % (2n ** 64n);
 
-      // Find user's Jetton wallet address for this token
+      // Step 4: fetch Jetton wallet address for this user
       const jwRes = await fetch(
         `/api/jetton-wallet?master=${accept.asset}&owner=${wallet.account.address}`
       );
       const { jettonWalletAddress } = await jwRes.json();
+      if (!jettonWalletAddress) throw new Error("Jetton wallet not found");
 
-      // Step 4: ask user to sign in Tonkeeper
+      // Step 5: build transfer payload (x402 format)
+      const jettonPayload = beginCell()
+        .storeUint(0xf8a7ea5, 32)                           // transfer op
+        .storeUint(queryId, 64)                             // queryId
+        .storeCoins(BigInt(accept.amount))                  // token amount
+        .storeAddress(Address.parse(accept.payTo))          // recipient
+        .storeAddress(Address.parse(wallet.account.address))// return excess gas
+        .storeMaybeRef(null)                                // no custom payload
+        .storeCoins(1_000_000n)                             // forward TON
+        .storeBit(0)                                        // no forward payload
+        .storeUint(0, 32)                                   // comment prefix
+        .storeStringTail(`x402:${queryId.toString()}`)      // facilitator tag
+        .endCell();
+
+      // Step 6: ask user to sign via TonConnect
       setStatus("waiting_wallet");
       const txResult = await tonConnectUI.sendTransaction({
         validUntil: Math.floor(Date.now() / 1000) + 300,
@@ -98,45 +102,43 @@ export function usePayment({ endpoint, onSuccess }: UsePaymentOptions) {
         ],
       });
 
-      // Step 5: wait for the tx to appear on-chain, then retry
+      // Step 7: send the payment signature to the endpoint
       setStatus("verifying");
-
-      const paymentPayload = JSON.stringify({
+      const paymentPayload = {
+        scheme: "ton-v1",
+        network: (process.env.NEXT_PUBLIC_TON_NETWORK || "testnet") as "testnet" | "mainnet",
         boc: txResult.boc,
-        asset: accept.asset,
-        amount: accept.amount,
-        payTo: accept.payTo,
-        network: process.env.NEXT_PUBLIC_TON_NETWORK || "testnet",
-      });
-      const paymentHeader = btoa(paymentPayload);
+        fromAddress: wallet.account.address,
+        queryId: queryId.toString(),
+      };
+      const paymentHeader = btoa(JSON.stringify(paymentPayload));
 
-      // Wait 5 seconds first — testnet needs time to propagate
+      // Step 8: wait for network propagation
       await wait(5000);
 
-      // Then retry up to 5 times every 3 seconds
+      // Step 9: retry the endpoint
       let secondRes: Response | null = null;
       for (let i = 0; i < 5; i++) {
         secondRes = await fetch(endpoint, {
-          headers: { "X-PAYMENT": paymentHeader },
+          headers: { "PAYMENT-SIGNATURE": paymentHeader },
         });
+        console.log(`Retry ${i} | status:`, secondRes.status);
+        console.log(`Retry ${i} | body:`, await secondRes.clone().text());
         if (secondRes.ok) break;
         if (i < 4) await wait(3000);
       }
 
       if (!secondRes || !secondRes.ok) {
-        throw new Error(`Payment verification failed after retries: ${secondRes?.status}`);
+        throw new Error(`Payment verification failed after retries`);
       }
 
       const data = await secondRes.json();
       onSuccess(data);
       setStatus("success");
-
     } catch (err: any) {
-      if (err?.message?.includes("User rejects")) {
-        setError("You cancelled the payment in your wallet.");
-      } else {
-        setError(err.message ?? "Something went wrong");
-      }
+      setError(err.message?.includes("User rejects") 
+        ? "You cancelled the payment in your wallet." 
+        : err.message ?? "Something went wrong");
       setStatus("error");
     }
   }, [endpoint, onSuccess, tonConnectUI, wallet]);
