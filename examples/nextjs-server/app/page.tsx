@@ -6,13 +6,20 @@ import { useRouter } from "next/navigation";
 import { usePayment } from "./hooks/usePayment";
 
 interface TelegramUser { id: number; first_name: string; username?: string; }
-type LobbyScreen = "home" | "creating" | "waiting" | "joining";
+type LobbyScreen = "home" | "creating" | "waiting" | "joining" | "join_preview";
 type GameMode = "stack" | "memory" | "reaction";
 
 const GAME_OPTIONS: { value: GameMode; label: string; emoji: string; desc: string }[] = [
   { value: "stack",    label: "Stack Duel",    emoji: "🎮", desc: "Drop blocks, stack as high as you can" },
   { value: "memory",  label: "Memory Grid",   emoji: "🧠", desc: "Remember and repeat the tile sequence" },
   { value: "reaction",label: "Reaction Time", emoji: "⚡", desc: "Tap the target as fast as possible" },
+];
+
+const BET_OPTIONS = [
+  { value: 0.01, label: "0.01", nano: "10000000" },
+  { value: 0.05, label: "0.05", nano: "50000000" },
+  { value: 0.10, label: "0.10", nano: "100000000" },
+  { value: 0.50, label: "0.50", nano: "500000000" },
 ];
 
 export default function Page() {
@@ -25,7 +32,13 @@ export default function Page() {
   const [joinInput, setJoinInput] = useState("");
   const [matchSeed, setMatchSeed] = useState(0);
   const [gameMode, setGameMode] = useState<GameMode>("stack");
-  const gameModeRef = useRef<GameMode>("stack"); // always current, survives stale closures
+  const gameModeRef = useRef<GameMode>("stack");
+  const [betAmount, setBetAmount] = useState(0.01);
+  const betRef = useRef(0.01);
+  const [joinMatchInfo, setJoinMatchInfo] = useState<{
+    gameMode: string; betAmount: number; nano: string;
+  } | null>(null);
+  const [joinEndpoint, setJoinEndpoint] = useState("/api/match-entry/10000000");
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -44,13 +57,14 @@ export default function Page() {
     return "/game";
   };
 
+  const betNano = BET_OPTIONS.find(o => o.value === betAmount)?.nano ?? "10000000";
+
   const createPayment = usePayment({
-    endpoint: "/api/match-entry",
+    endpoint: `/api/match-entry/${betNano}`,
     onSuccess: useCallback(async (_data: any) => {
       try {
-        // Use ref — not state — so we always get the latest selected mode
         const currentMode = gameModeRef.current;
-        console.log("=== CREATING MATCH with mode:", currentMode);
+        const currentBet = betRef.current;
         const res = await fetch("/api/match/create", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -58,19 +72,19 @@ export default function Page() {
             playerAddress: wallet?.account?.address,
             paymentBoc: "verified",
             gameMode: currentMode,
+            betAmount: currentBet,
           }),
         });
         const match = await res.json();
-        console.log("=== SERVER RETURNED:", match);
         setMatchId(match.matchId);
         setMatchSeed(match.seed);
         setScreen("waiting");
       } catch (err: any) { setError("Failed to create match: " + err.message); }
-    }, [wallet]), // gameMode removed from deps — ref handles it
+    }, [wallet]),
   });
 
   const joinPayment = usePayment({
-    endpoint: "/api/match-entry",
+    endpoint: joinEndpoint,
     onSuccess: useCallback(async (_data: any) => {
       try {
         const res = await fetch("/api/match/join", {
@@ -89,6 +103,24 @@ export default function Page() {
     }, [wallet, joinInput, router]),
   });
 
+  const handlePreviewMatch = useCallback(async () => {
+    const id = joinInput.trim().toUpperCase();
+    if (!id) return;
+    setError(null);
+    try {
+      const res = await fetch(`/api/match/${id}`);
+      const data = await res.json();
+      if (data.error) { setError(data.error); return; }
+      if (data.status !== "waiting") { setError("Match is not open (already started or finished)"); return; }
+      const bet = data.betAmount ?? 0.01;
+      const nano = BET_OPTIONS.find(o => o.value === bet)?.nano
+        ?? Math.round(bet * 1_000_000_000).toString();
+      setJoinMatchInfo({ gameMode: data.gameMode, betAmount: bet, nano });
+      setJoinEndpoint(`/api/match-entry/${nano}`);
+      setScreen("join_preview");
+    } catch (err: any) { setError("Could not look up match: " + err.message); }
+  }, [joinInput]);
+
   // Player 1 waiting room — polls until opponent joins
   useEffect(() => {
     if (screen !== "waiting" || !matchId) return;
@@ -98,7 +130,6 @@ export default function Page() {
         const data = await res.json();
         if (data.status === "playing") {
           clearInterval(interval);
-          // Use gameModeRef so we always navigate to the correct game
           router.push(`${getGamePage(gameModeRef.current)}?matchId=${matchId}&playerAddress=${wallet?.account?.address}&seed=${matchSeed}&role=player1`);
         }
       } catch {}
@@ -119,6 +150,7 @@ export default function Page() {
   const isCreating = ["loading","payment_required","waiting_wallet","verifying"].includes(createPayment.status);
   const isJoining  = ["loading","payment_required","waiting_wallet","verifying"].includes(joinPayment.status);
   const selectedGame = GAME_OPTIONS.find(g => g.value === gameMode)!;
+  const prize = (betAmount * 2 * 0.9).toFixed(3);
 
   return (
     <main style={s.main}>
@@ -152,9 +184,9 @@ export default function Page() {
             <div style={s.card}>
               <div style={s.sectionLabel}>How it works</div>
               {[
-                ["1","Pay 0.01 BSA USD","Entry fee to create or join"],
-                ["2","Pick your game","3 game modes available"],
-                ["3","Winner takes 0.018","90% of pot. Platform keeps 10%."],
+                ["1", `Pay ${betAmount.toFixed(2)} BSA USD`, "Entry fee to create or join"],
+                ["2", "Pick your game", "3 game modes available"],
+                ["3", `Winner takes ${prize}`, `90% of ${(betAmount*2).toFixed(2)} BSA pot. Platform keeps 10%.`],
               ].map(([n,title,sub]) => (
                 <div key={n} style={s.step}>
                   <div style={s.stepNum}>{n}</div>
@@ -167,6 +199,25 @@ export default function Page() {
             </div>
 
             <div style={s.card}>
+              <div style={s.sectionLabel}>Bet Amount (BSA USD)</div>
+              <div style={{ display:"flex", gap:6 }}>
+                {BET_OPTIONS.map(opt => (
+                  <button
+                    key={opt.value}
+                    onClick={() => { setBetAmount(opt.value); betRef.current = opt.value; }}
+                    style={{ ...s.betChip, ...(betAmount === opt.value ? s.betChipActive : {}) }}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+              <div style={s.betInfo}>
+                Pot: <strong style={{ color:"var(--text-primary)" }}>{(betAmount*2).toFixed(2)} BSA USD</strong>
+                {" · "}Winner: <strong style={{ color:"var(--ton-blue)" }}>{prize} BSA USD</strong>
+              </div>
+            </div>
+
+            <div style={s.card}>
               <div style={s.sectionLabel}>Choose Game Mode</div>
               <div style={{ position:"relative" as const }}>
                 <select
@@ -174,7 +225,7 @@ export default function Page() {
                   onChange={e => {
                     const m = e.target.value as GameMode;
                     setGameMode(m);
-                    gameModeRef.current = m; // keep ref in sync
+                    gameModeRef.current = m;
                   }}
                   style={s.select}
                 >
@@ -209,11 +260,15 @@ export default function Page() {
               <span style={{ fontSize:20 }}>{selectedGame.emoji}</span>
               <span style={{ fontSize:13, fontWeight:600, color:"var(--text-primary)" }}>{selectedGame.label}</span>
             </div>
-            <p style={s.cardDesc}>Pay <strong style={{ color:"var(--ton-blue)" }}>0.01 BSA USD</strong> entry fee. You'll get a match ID to share.</p>
+            <div style={s.betBadge}>
+              Bet: <strong style={{ color:"var(--ton-blue)" }}>{betAmount.toFixed(2)} BSA USD</strong>
+              {" · "}Prize: <strong style={{ color:"var(--ton-blue)" }}>{prize} BSA USD</strong>
+            </div>
+            <p style={s.cardDesc}>Pay <strong style={{ color:"var(--ton-blue)" }}>{betAmount.toFixed(2)} BSA USD</strong> entry fee. You'll get a match ID to share.</p>
             {!wallet && <div style={s.warnBox}>⚠ Connect wallet first</div>}
             {createPayment.error && <div style={s.errBox}>⚠ {createPayment.error}</div>}
             <button style={{ ...s.btn, opacity:(!wallet||isCreating)?0.5:1 }} disabled={!wallet||isCreating} onClick={createPayment.execute}>
-              {isCreating ? "⏳ Processing..." : "Pay 0.01 BSA USD & Create"}
+              {isCreating ? "⏳ Processing..." : `Pay ${betAmount.toFixed(2)} BSA USD & Create`}
             </button>
             <button style={{ ...s.btn, ...s.btnGhost }} onClick={() => setScreen("home")}>← Back</button>
           </div>
@@ -229,6 +284,7 @@ export default function Page() {
             </div>
             <p style={s.cardDesc}>
               Game: <strong>{selectedGame.emoji} {selectedGame.label}</strong><br/>
+              Bet: <strong style={{ color:"var(--ton-blue)" }}>{betAmount.toFixed(2)} BSA USD</strong><br/>
               Share this ID with your opponent.
             </p>
             <button style={s.btn} onClick={shareMatch}>📤 Share Match ID</button>
@@ -243,13 +299,59 @@ export default function Page() {
         {screen === "joining" && (
           <div style={s.card}>
             <div style={s.cardTitle}>Join a Match</div>
-            <p style={s.cardDesc}>Enter the match ID. Game mode is set by the creator.</p>
-            <input style={s.input} placeholder="Match ID (e.g. ABC123)" value={joinInput} onChange={e => setJoinInput(e.target.value.toUpperCase())} maxLength={8} />
-            {joinPayment.error && <div style={s.errBox}>⚠ {joinPayment.error}</div>}
-            <button style={{ ...s.btn, opacity:(!wallet||!joinInput.trim()||isJoining)?0.5:1 }} disabled={!wallet||!joinInput.trim()||isJoining} onClick={joinPayment.execute}>
-              {isJoining ? "⏳ Processing..." : "Pay 0.01 BSA USD & Join"}
+            <p style={s.cardDesc}>Enter the match ID to see bet details before paying.</p>
+            <input
+              style={s.input}
+              placeholder="Match ID (e.g. ABC123)"
+              value={joinInput}
+              onChange={e => setJoinInput(e.target.value.toUpperCase())}
+              maxLength={8}
+            />
+            <button
+              style={{ ...s.btn, opacity:(!joinInput.trim())?0.5:1 }}
+              disabled={!joinInput.trim()}
+              onClick={handlePreviewMatch}
+            >
+              Preview Match →
             </button>
             <button style={{ ...s.btn, ...s.btnGhost }} onClick={() => setScreen("home")}>← Back</button>
+          </div>
+        )}
+
+        {screen === "join_preview" && joinMatchInfo && (
+          <div style={s.card}>
+            <div style={s.cardTitle}>Join Match</div>
+            <div style={s.matchIdBox}>
+              <div style={{ fontSize:10, color:"var(--text-muted)", marginBottom:4, textTransform:"uppercase" as const, letterSpacing:"0.07em" }}>Match ID</div>
+              <div style={{ fontSize:28, fontWeight:700, fontFamily:"var(--font-mono)", color:"var(--ton-blue)", letterSpacing:"0.1em" }}>{joinInput.trim().toUpperCase()}</div>
+            </div>
+            <div style={s.previewRow}>
+              <div style={s.previewItem}>
+                <div style={s.previewLabel}>Game Mode</div>
+                <div style={s.previewValue}>
+                  {GAME_OPTIONS.find(g => g.value === joinMatchInfo.gameMode)?.emoji}{" "}
+                  {GAME_OPTIONS.find(g => g.value === joinMatchInfo.gameMode)?.label ?? joinMatchInfo.gameMode}
+                </div>
+              </div>
+              <div style={s.previewItem}>
+                <div style={s.previewLabel}>Entry Fee</div>
+                <div style={{ ...s.previewValue, color:"var(--ton-blue)" }}>{joinMatchInfo.betAmount.toFixed(2)} BSA USD</div>
+              </div>
+              <div style={s.previewItem}>
+                <div style={s.previewLabel}>Prize Pool</div>
+                <div style={{ ...s.previewValue, color:"var(--ton-blue)" }}>{(joinMatchInfo.betAmount * 2 * 0.9).toFixed(3)} BSA USD</div>
+              </div>
+            </div>
+            {!wallet && <div style={s.warnBox}>⚠ Connect wallet first</div>}
+            {joinPayment.error && <div style={s.errBox}>⚠ {joinPayment.error}</div>}
+            <button
+              style={{ ...s.btn, opacity:(!wallet||isJoining)?0.5:1 }}
+              disabled={!wallet||isJoining}
+              onClick={joinPayment.execute}
+            >
+              {isJoining ? "⏳ Processing..." : `Pay ${joinMatchInfo.betAmount.toFixed(2)} BSA USD & Join`}
+            </button>
+            <button style={{ ...s.btn, ...s.btnGhost }} onClick={() => setScreen("joining")}>← Back</button>
           </div>
         )}
       </div>
@@ -271,6 +373,10 @@ const s: Record<string, React.CSSProperties> = {
   sectionLabel: { fontSize:10, fontWeight:600, color:"var(--text-muted)", textTransform:"uppercase" as const, letterSpacing:"0.07em" },
   step: { display:"flex", gap:10, alignItems:"flex-start", padding:"6px 0", borderBottom:"1px solid var(--border)" },
   stepNum: { width:22, height:22, borderRadius:"50%", background:"var(--ton-blue-dim)", border:"1px solid var(--border-active)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:11, color:"var(--ton-blue)", fontFamily:"var(--font-mono)", fontWeight:700, flexShrink:0, marginTop:1 },
+  betChip: { flex:1, padding:"10px 4px", background:"var(--bg)", border:"1px solid var(--border)", borderRadius:8, color:"var(--text-secondary)", fontSize:13, fontWeight:600, cursor:"pointer", fontFamily:"var(--font-mono)" },
+  betChipActive: { background:"var(--ton-blue-dim)", border:"1px solid var(--border-active)", color:"var(--ton-blue)" },
+  betInfo: { fontSize:12, color:"var(--text-muted)", textAlign:"center" as const },
+  betBadge: { fontSize:13, color:"var(--text-secondary)", background:"var(--bg)", borderRadius:8, padding:"8px 12px", border:"1px solid var(--border)" },
   select: { width:"100%", padding:"12px 36px 12px 14px", background:"var(--bg)", border:"1px solid var(--border-active)", borderRadius:10, color:"var(--text-primary)", fontSize:15, fontFamily:"var(--font-sans)", fontWeight:600, appearance:"none" as const, WebkitAppearance:"none" as const, cursor:"pointer", outline:"none" },
   selectArrow: { position:"absolute" as const, right:14, top:"50%", transform:"translateY(-50%)", color:"var(--text-muted)", pointerEvents:"none" as const, fontSize:14 },
   modeDesc: { display:"flex", alignItems:"center", gap:10, padding:"8px 10px", background:"var(--bg)", borderRadius:8, border:"1px solid var(--border)" },
@@ -282,4 +388,8 @@ const s: Record<string, React.CSSProperties> = {
   input: { width:"100%", padding:"12px 14px", background:"var(--bg)", border:"1px solid var(--border)", borderRadius:10, color:"var(--text-primary)", fontSize:18, fontFamily:"var(--font-mono)", fontWeight:700, letterSpacing:"0.15em", textAlign:"center" as const, boxSizing:"border-box" as const },
   matchIdBox: { background:"var(--bg)", border:"1px solid var(--border-active)", borderRadius:10, padding:"14px", textAlign:"center" as const },
   spinnerSm: { width:16, height:16, border:"2px solid var(--border)", borderTopColor:"var(--ton-blue)", borderRadius:"50%", animation:"spin 0.8s linear infinite", flexShrink:0 },
+  previewRow: { display:"flex", gap:8 },
+  previewItem: { flex:1, background:"var(--bg)", border:"1px solid var(--border)", borderRadius:8, padding:"10px 8px", display:"flex", flexDirection:"column", gap:4, alignItems:"center" },
+  previewLabel: { fontSize:10, color:"var(--text-muted)", textTransform:"uppercase" as const, letterSpacing:"0.06em", fontWeight:600 },
+  previewValue: { fontSize:13, fontWeight:700, color:"var(--text-primary)", textAlign:"center" as const },
 };

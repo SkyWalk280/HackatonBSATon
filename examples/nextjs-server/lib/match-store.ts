@@ -15,6 +15,7 @@ export interface Match {
   player1: PlayerState;
   player2: PlayerState | null;
   entryFee: string;
+  betAmount: number; // human-readable BSA USD, e.g. 0.05
   seed: number;
   winnerId: string | null;
   payoutTxHash: string | null;
@@ -30,6 +31,7 @@ export function createMatch(
   paymentBoc: string,
   entryFee: string,
   gameMode: GameMode = "stack",
+  betAmount: number = 0.01,
 ): Match {
   const id = Math.random().toString(36).substring(2, 8).toUpperCase();
   const seed = Math.floor(Math.random() * 1_000_000);
@@ -41,6 +43,7 @@ export function createMatch(
     player1: { address: player1Address, score: null, finished: false, paymentBoc },
     player2: null,
     entryFee,
+    betAmount,
     seed,
     winnerId: null,
     payoutTxHash: null,

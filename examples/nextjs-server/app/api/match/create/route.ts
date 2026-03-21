@@ -1,11 +1,11 @@
 import { createMatch } from "../../../../lib/match-store";
 import type { GameMode } from "../../../../lib/match-store";
 
-const ENTRY_FEE = "10000000";
+const ALLOWED_BET_AMOUNTS = [0.01, 0.05, 0.1, 0.5];
 
 export async function POST(request: Request) {
   try {
-    const { playerAddress, paymentBoc, gameMode } = await request.json();
+    const { playerAddress, paymentBoc, gameMode, betAmount } = await request.json();
 
     if (!playerAddress || !paymentBoc) {
       return Response.json(
@@ -14,14 +14,18 @@ export async function POST(request: Request) {
       );
     }
 
+    const bet = ALLOWED_BET_AMOUNTS.includes(betAmount) ? betAmount : 0.01;
+    const entryFeeNano = Math.round(bet * 1_000_000_000).toString();
+
     const validModes: GameMode[] = ["stack", "memory", "reaction"];
     const mode: GameMode = validModes.includes(gameMode) ? gameMode : "stack";
-    const match = await createMatch(playerAddress, paymentBoc, ENTRY_FEE, mode);
+    const match = createMatch(playerAddress, paymentBoc, entryFeeNano, mode, bet);
 
     return Response.json({
       matchId: match.id,
       seed: match.seed,
       entryFee: match.entryFee,
+      betAmount: match.betAmount,
       gameMode: match.gameMode,
       status: match.status,
     });

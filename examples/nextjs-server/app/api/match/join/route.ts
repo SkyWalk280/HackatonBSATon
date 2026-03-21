@@ -24,7 +24,8 @@ export async function POST(request: Request) {
       matchId: match.id,
       seed: match.seed,
       entryFee: match.entryFee,
-      gameMode: match.gameMode, 
+      betAmount: match.betAmount ?? 0.01,
+      gameMode: match.gameMode,
       status: match.status,
     });
   } catch (err: any) {

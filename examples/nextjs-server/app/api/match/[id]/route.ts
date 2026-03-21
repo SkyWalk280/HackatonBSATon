@@ -17,6 +17,7 @@ export async function GET(
     gameMode: match.gameMode,
     seed: match.seed,
     entryFee: match.entryFee,
+    betAmount: match.betAmount ?? 0.01,
     player1: {
       address: match.player1.address,
       score: match.player1.score,
