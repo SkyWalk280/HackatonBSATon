@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useCallback, useState } from "react";
+import { useEffect, useRef, useCallback, useState, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useTonWallet } from "@tonconnect/ui-react";
 
@@ -33,7 +33,7 @@ interface GameState {
   cameraY: number;
 }
 
-export default function GamePage() {
+function GameContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const wallet = useTonWallet();
@@ -42,7 +42,7 @@ export default function GamePage() {
   const playerAddress = searchParams.get("playerAddress") || wallet?.account?.address;
   const seedParam = searchParams.get("seed");
   const seed = seedParam ? parseInt(seedParam) : Math.floor(Math.random() * 1_000_000);
-  const role = searchParams.get("role") || "player1"; // "player1" or "player2"
+  const role = searchParams.get("role") || "player1";
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const gameRef = useRef<GameState | null>(null);
@@ -55,7 +55,7 @@ export default function GamePage() {
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [matchResult, setMatchResult] = useState<{
-    winnerId: string; // "player1" or "player2"
+    winnerId: string;
     player1Score: number;
     player2Score: number;
     prizeAmount: string;
@@ -185,7 +185,7 @@ export default function GamePage() {
         const matchData = await matchRes.json();
         const prizeAmount = Math.floor(Number(matchData.entryFee) * 2 * 0.9).toString();
         setMatchResult({
-          winnerId: matchData.winnerId, // "player1" or "player2"
+          winnerId: matchData.winnerId,
           player1Score: matchData.player1?.score ?? 0,
           player2Score: matchData.player2?.score ?? 0,
           prizeAmount,
@@ -199,7 +199,6 @@ export default function GamePage() {
     }
   }, [matchId, playerAddress, submitting, submitted]);
 
-  // Poll for opponent finishing
   useEffect(() => {
     if (!submitted || matchResult || !matchId) return;
     const interval = setInterval(async () => {
@@ -212,7 +211,7 @@ export default function GamePage() {
             ? Math.floor(Number(data.entryFee) * 2 * 0.9).toString()
             : "18000000";
           setMatchResult({
-            winnerId: data.winnerId, // "player1" or "player2"
+            winnerId: data.winnerId,
             player1Score: data.player1?.score ?? 0,
             player2Score: data.player2?.score ?? 0,
             prizeAmount,
@@ -241,9 +240,7 @@ export default function GamePage() {
     rafRef.current = requestAnimationFrame(tick);
   }, [initGame, tick]);
 
-  // Results screen
   if (matchResult) {
-    // Use role to determine scores correctly — works even with same wallet address
     const isWinner = matchResult.winnerId === role;
     const myScore = role === "player1" ? matchResult.player1Score : matchResult.player2Score;
     const opponentScore = role === "player1" ? matchResult.player2Score : matchResult.player1Score;
@@ -335,6 +332,19 @@ export default function GamePage() {
         <div style={s.scoreOverlay}>{score}</div>
       </div>
     </div>
+  );
+}
+
+// Suspense wrapper required by Next.js 15 for useSearchParams
+export default function GamePage() {
+  return (
+    <Suspense fallback={
+      <div style={{ minHeight:"100vh", background:"var(--bg)", display:"flex", alignItems:"center", justifyContent:"center" }}>
+        <div style={{ color:"var(--text-secondary)", fontSize:14 }}>Loading...</div>
+      </div>
+    }>
+      <GameContent />
+    </Suspense>
   );
 }
 
