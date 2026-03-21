@@ -1,11 +1,11 @@
-
 import { createMatch } from "../../../../lib/match-store";
+import type { GameMode } from "../../../../lib/match-store";
 
 const ENTRY_FEE = "10000000";
 
 export async function POST(request: Request) {
   try {
-    const { playerAddress, paymentBoc } = await request.json();
+    const { playerAddress, paymentBoc, gameMode } = await request.json();
 
     if (!playerAddress || !paymentBoc) {
       return Response.json(
@@ -14,12 +14,15 @@ export async function POST(request: Request) {
       );
     }
 
-    const match = await createMatch(playerAddress, paymentBoc, ENTRY_FEE);
+    const validModes: GameMode[] = ["stack", "memory", "reaction"];
+    const mode: GameMode = validModes.includes(gameMode) ? gameMode : "stack";
+    const match = await createMatch(playerAddress, paymentBoc, ENTRY_FEE, mode);
 
     return Response.json({
       matchId: match.id,
       seed: match.seed,
       entryFee: match.entryFee,
+      gameMode: match.gameMode,
       status: match.status,
     });
   } catch (err: any) {

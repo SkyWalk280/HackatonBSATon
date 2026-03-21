@@ -11,7 +11,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const match = await joinMatch(matchId, playerAddress, paymentBoc);
+    const match = joinMatch(matchId, playerAddress, paymentBoc);
 
     if (!match) {
       return Response.json(
@@ -24,6 +24,7 @@ export async function POST(request: Request) {
       matchId: match.id,
       seed: match.seed,
       entryFee: match.entryFee,
+      gameMode: match.gameMode, 
       status: match.status,
     });
   } catch (err: any) {

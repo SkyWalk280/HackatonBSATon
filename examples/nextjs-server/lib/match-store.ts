@@ -1,6 +1,5 @@
-import { Redis } from "@upstash/redis";
-
 export type MatchStatus = "waiting" | "playing" | "finished";
+export type GameMode = "stack" | "memory" | "reaction";
 
 export interface PlayerState {
   address: string;
@@ -12,6 +11,7 @@ export interface PlayerState {
 export interface Match {
   id: string;
   status: MatchStatus;
+  gameMode: GameMode;
   player1: PlayerState;
   player2: PlayerState | null;
   entryFee: string;
@@ -21,70 +21,66 @@ export interface Match {
   createdAt: number;
 }
 
-const redis = new Redis({
-  url: process.env.UPSTASH_REDIS_REST_URL!,
-  token: process.env.UPSTASH_REDIS_REST_TOKEN!,
-});
+const g = global as any;
+if (!g.__matches) g.__matches = new Map<string, Match>();
+const matches: Map<string, Match> = g.__matches;
 
-const MATCH_TTL = 60 * 60 * 2; // 2 hours
-
-function key(id: string) { return `match:${id}`; }
-
-async function save(match: Match): Promise<void> {
-  await redis.set(key(match.id), JSON.stringify(match), { ex: MATCH_TTL });
-}
-
-async function load(id: string): Promise<Match | null> {
-  const data = await redis.get<string>(key(id));
-  if (!data) return null;
-  return typeof data === "string" ? JSON.parse(data) : data as Match;
-}
-
-export async function createMatch(
+export function createMatch(
   player1Address: string,
   paymentBoc: string,
   entryFee: string,
-): Promise<Match> {
+  gameMode: GameMode = "stack",
+): Match {
   const id = Math.random().toString(36).substring(2, 8).toUpperCase();
   const seed = Math.floor(Math.random() * 1_000_000);
+
   const match: Match = {
-    id, status: "waiting",
+    id,
+    status: "waiting",
+    gameMode,
     player1: { address: player1Address, score: null, finished: false, paymentBoc },
-    player2: null, entryFee, seed,
-    winnerId: null, payoutTxHash: null, createdAt: Date.now(),
+    player2: null,
+    entryFee,
+    seed,
+    winnerId: null,
+    payoutTxHash: null,
+    createdAt: Date.now(),
   };
-  await save(match);
+
+  matches.set(id, match);
   return match;
 }
 
-export async function getMatch(id: string): Promise<Match | null> {
-  return load(id);
+export function getMatch(id: string): Match | undefined {
+  return matches.get(id);
 }
 
-export async function joinMatch(
+export function joinMatch(
   id: string,
   player2Address: string,
   paymentBoc: string,
-): Promise<Match | null> {
-  const match = await load(id);
-  if (!match || match.status !== "waiting" || match.player2) return null;
+): Match | null {
+  const match = matches.get(id);
+  if (!match) return null;
+  if (match.status !== "waiting") return null;
+  if (match.player2) return null;
+
   match.player2 = { address: player2Address, score: null, finished: false, paymentBoc };
   match.status = "playing";
-  await save(match);
+  matches.set(id, match);
   return match;
 }
 
-export async function submitScore(
+export function submitScore(
   id: string,
   playerAddress: string,
   score: number,
   role: string,
-): Promise<Match | null> {
-  const match = await load(id);
+): Match | null {
+  const match = matches.get(id);
   if (!match) return null;
   if (match.status !== "playing") return null;
 
-  // Use role directly — no address matching ambiguity
   if (role === "player1" && !match.player1.finished) {
     match.player1.score = score;
     match.player1.finished = true;
@@ -106,13 +102,14 @@ export async function submitScore(
     }
   }
 
-  await save(match);
+  matches.set(id, match);
   return match;
 }
 
-export async function setPayoutTx(id: string, txHash: string): Promise<void> {
-  const match = await load(id);
-  if (!match) return;
-  match.payoutTxHash = txHash;
-  await save(match);
+export function setPayoutTx(id: string, txHash: string): void {
+  const match = matches.get(id);
+  if (match) {
+    match.payoutTxHash = txHash;
+    matches.set(id, match);
+  }
 }

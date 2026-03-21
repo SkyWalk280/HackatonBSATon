@@ -14,6 +14,7 @@ export async function GET(
   return Response.json({
     id: match.id,
     status: match.status,
+    gameMode: match.gameMode,
     seed: match.seed,
     entryFee: match.entryFee,
     player1: {
