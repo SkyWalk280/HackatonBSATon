@@ -19,7 +19,7 @@ export async function POST(request: Request) {
 
     const validModes: GameMode[] = ["stack", "memory", "reaction"];
     const mode: GameMode = validModes.includes(gameMode) ? gameMode : "stack";
-    const match = createMatch(playerAddress, paymentBoc, entryFeeNano, mode, bet);
+    const match = await createMatch(playerAddress, paymentBoc, entryFeeNano, mode, bet);
 
     return Response.json({
       matchId: match.id,
@@ -28,6 +28,7 @@ export async function POST(request: Request) {
       betAmount: match.betAmount,
       gameMode: match.gameMode,
       status: match.status,
+      expiresAt: match.expiresAt,
     });
   } catch (err: any) {
     return Response.json({ error: err.message }, { status: 500 });

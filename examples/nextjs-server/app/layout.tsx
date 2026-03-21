@@ -4,8 +4,8 @@ import { Providers } from "./providers";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "TON Mini App",
-  description: "A Telegram Mini App powered by TON x402 payments",
+  title: "Stack Duel",
+  description: "1v1 skill games on TON — pay to play, winner takes the pot",
 };
 
 export default function RootLayout({

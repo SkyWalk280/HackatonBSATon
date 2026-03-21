@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef, Suspense } from "react";
 import { TonConnectButton, useTonWallet } from "@tonconnect/ui-react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { usePayment } from "./hooks/usePayment";
 
 interface TelegramUser { id: number; first_name: string; username?: string; }
@@ -22,24 +22,41 @@ const BET_OPTIONS = [
   { value: 0.50, label: "0.50", nano: "500000000" },
 ];
 
-export default function Page() {
+function LobbyContent() {
+  const searchParams = useSearchParams();
   const wallet = useTonWallet();
   const router = useRouter();
 
+  // Read preset params (used by rematch / deep-link join)
+  const rawPresetMode = searchParams.get("presetMode") ?? "";
+  const presetMode: GameMode = (["stack","memory","reaction"] as const).includes(rawPresetMode as GameMode)
+    ? rawPresetMode as GameMode : "stack";
+  const rawPresetBet = Number(searchParams.get("presetBet") ?? "");
+  const presetBet = BET_OPTIONS.some(o => o.value === rawPresetBet) ? rawPresetBet : 0.01;
+  const joinMatchIdParam = searchParams.get("joinMatchId") ?? "";
+
   const [tgUser, setTgUser] = useState<TelegramUser | null>(null);
-  const [screen, setScreen] = useState<LobbyScreen>("home");
+  // If arriving via rematch (presetMode param present), skip straight to creating screen
+  const isRematch = searchParams.get("presetMode") !== null;
+  const [screen, setScreen] = useState<LobbyScreen>(isRematch ? "creating" : "home");
   const [matchId, setMatchId] = useState("");
   const [joinInput, setJoinInput] = useState("");
   const [matchSeed, setMatchSeed] = useState(0);
-  const [gameMode, setGameMode] = useState<GameMode>("stack");
-  const gameModeRef = useRef<GameMode>("stack");
-  const [betAmount, setBetAmount] = useState(0.01);
-  const betRef = useRef(0.01);
+  const [matchExpiresAt, setMatchExpiresAt] = useState<number | null>(null);
+  const [timeLeft, setTimeLeft] = useState("5:00");
+  const [gameMode, setGameMode] = useState<GameMode>(presetMode);
+  const gameModeRef = useRef<GameMode>(presetMode);
+  const [betAmount, setBetAmount] = useState(presetBet);
+  const betRef = useRef(presetBet);
   const [joinMatchInfo, setJoinMatchInfo] = useState<{
     gameMode: string; betAmount: number; nano: string;
   } | null>(null);
   const [joinEndpoint, setJoinEndpoint] = useState("/api/match-entry/10000000");
   const [error, setError] = useState<string | null>(null);
+  const [username, setUsername] = useState<string | null>(null);
+  const [editingUsername, setEditingUsername] = useState(false);
+  const [usernameInput, setUsernameInput] = useState("");
+  const [usernameSaving, setUsernameSaving] = useState(false);
 
   useEffect(() => {
     const tg = (window as any).Telegram?.WebApp;
@@ -50,6 +67,70 @@ export default function Page() {
       if (tg.initDataUnsafe?.user) setTgUser(tg.initDataUnsafe.user);
     }
   }, []);
+
+  // Fetch username when wallet connects
+  useEffect(() => {
+    const addr = wallet?.account?.address;
+    if (!addr) return;
+    fetch(`/api/profile/username?address=${encodeURIComponent(addr)}`)
+      .then(r => r.json())
+      .then(d => { if (d.username) { setUsername(d.username); setUsernameInput(d.username); } })
+      .catch(() => {});
+  }, [wallet?.account?.address]);
+
+  async function saveUsername() {
+    const addr = wallet?.account?.address;
+    if (!addr || !usernameInput.trim()) return;
+    setUsernameSaving(true);
+    try {
+      const r = await fetch("/api/profile/username", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ address: addr, username: usernameInput }),
+      });
+      const d = await r.json();
+      if (d.username) { setUsername(d.username); setEditingUsername(false); }
+      else if (d.error) setError(d.error);
+    } catch (e: any) { setError(e.message); }
+    finally { setUsernameSaving(false); }
+  }
+
+  // Auto-join from deep link (?joinMatchId=X)
+  useEffect(() => {
+    if (!joinMatchIdParam.trim()) return;
+    const id = joinMatchIdParam.toUpperCase();
+    setJoinInput(id);
+    (async () => {
+      try {
+        const res = await fetch(`/api/match/${id}`);
+        const data = await res.json();
+        if (data.error || data.status !== "waiting") {
+          setError(data.error || "Match is not open");
+          return;
+        }
+        const bet = data.betAmount ?? 0.01;
+        const nano = BET_OPTIONS.find(o => o.value === bet)?.nano
+          ?? Math.round(bet * 1_000_000_000).toString();
+        setJoinMatchInfo({ gameMode: data.gameMode, betAmount: bet, nano });
+        setJoinEndpoint(`/api/match-entry/${nano}`);
+        setScreen("join_preview");
+      } catch (e: any) { setError("Could not load match: " + e.message); }
+    })();
+  }, [joinMatchIdParam]);
+
+  // Waiting room countdown
+  useEffect(() => {
+    if (screen !== "waiting" || !matchExpiresAt) return;
+    const tick = () => {
+      const diff = Math.max(0, matchExpiresAt - Date.now());
+      const mins = Math.floor(diff / 60000);
+      const secs = Math.floor((diff % 60000) / 1000);
+      setTimeLeft(`${mins}:${secs.toString().padStart(2, "0")}`);
+    };
+    tick();
+    const interval = setInterval(tick, 1000);
+    return () => clearInterval(interval);
+  }, [screen, matchExpiresAt]);
 
   const getGamePage = (mode: string) => {
     if (mode === "memory") return "/memory";
@@ -78,6 +159,7 @@ export default function Page() {
         const match = await res.json();
         setMatchId(match.matchId);
         setMatchSeed(match.seed);
+        setMatchExpiresAt(match.expiresAt ?? null);
         setScreen("waiting");
       } catch (err: any) { setError("Failed to create match: " + err.message); }
     }, [wallet]),
@@ -121,7 +203,7 @@ export default function Page() {
     } catch (err: any) { setError("Could not look up match: " + err.message); }
   }, [joinInput]);
 
-  // Player 1 waiting room — polls until opponent joins
+  // Player 1 waiting room — polls until opponent joins or match expires
   useEffect(() => {
     if (screen !== "waiting" || !matchId) return;
     const interval = setInterval(async () => {
@@ -131,6 +213,10 @@ export default function Page() {
         if (data.status === "playing") {
           clearInterval(interval);
           router.push(`${getGamePage(gameModeRef.current)}?matchId=${matchId}&playerAddress=${wallet?.account?.address}&seed=${matchSeed}&role=player1`);
+        } else if (data.status === "expired") {
+          clearInterval(interval);
+          setScreen("home");
+          setError("Match expired — no one joined in time. Your entry fee will be refunded.");
         }
       } catch {}
     }, 2000);
@@ -169,6 +255,36 @@ export default function Page() {
             </span>
           </div>
         )}
+        {wallet && !editingUsername && (
+          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginTop:6 }}>
+            <span style={{ fontSize:12, color:"var(--text-muted)" }}>
+              Display name: <strong style={{ color: username ? "var(--text-primary)" : "var(--text-muted)" }}>{username ?? "not set"}</strong>
+            </span>
+            <button onClick={() => setEditingUsername(true)} style={{ background:"none", border:"none", color:"var(--ton-blue)", fontSize:12, cursor:"pointer", padding:0 }}>
+              {username ? "✏️ Edit" : "✏️ Set"}
+            </button>
+          </div>
+        )}
+        {wallet && editingUsername && (
+          <div style={{ display:"flex", gap:6, marginTop:6 }}>
+            <input
+              value={usernameInput}
+              onChange={e => setUsernameInput(e.target.value)}
+              maxLength={20}
+              placeholder="Display name…"
+              autoFocus
+              style={{ flex:1, padding:"6px 10px", background:"var(--bg)", border:"1px solid var(--border-active)", borderRadius:7, color:"var(--text-primary)", fontSize:13, outline:"none" }}
+            />
+            <button onClick={saveUsername} disabled={usernameSaving || usernameInput.trim().length < 2}
+              style={{ padding:"6px 12px", background:"var(--ton-blue)", border:"none", borderRadius:7, color:"#fff", fontSize:13, fontWeight:600, cursor:"pointer", opacity: usernameSaving ? 0.6 : 1 }}>
+              {usernameSaving ? "…" : "Save"}
+            </button>
+            <button onClick={() => { setEditingUsername(false); setUsernameInput(username ?? ""); }}
+              style={{ padding:"6px 10px", background:"none", border:"1px solid var(--border)", borderRadius:7, color:"var(--text-secondary)", fontSize:13, cursor:"pointer" }}>
+              ✕
+            </button>
+          </div>
+        )}
       </header>
 
       <div style={s.body}>
@@ -186,7 +302,7 @@ export default function Page() {
               {[
                 ["1", `Pay ${betAmount.toFixed(2)} BSA USD`, "Entry fee to create or join"],
                 ["2", "Pick your game", "3 game modes available"],
-                ["3", `Winner takes ${prize}`, `90% of ${(betAmount*2).toFixed(2)} BSA pot. Platform keeps 10%.`],
+                ["3", `Winner takes ${prize}`, `90% of ${(betAmount*2).toFixed(2)} BSA USD pot`],
               ].map(([n,title,sub]) => (
                 <div key={n} style={s.step}>
                   <div style={s.stepNum}>{n}</div>
@@ -230,9 +346,7 @@ export default function Page() {
                   style={s.select}
                 >
                   {GAME_OPTIONS.map(opt => (
-                    <option key={opt.value} value={opt.value}>
-                      {opt.emoji} {opt.label}
-                    </option>
+                    <option key={opt.value} value={opt.value}>{opt.emoji} {opt.label}</option>
                   ))}
                 </select>
                 <div style={s.selectArrow}>▾</div>
@@ -250,6 +364,10 @@ export default function Page() {
             <button style={{ ...s.btn, ...s.btnSecondary }} onClick={() => { setError(null); setScreen("joining"); }}>
               🔗 Join Match
             </button>
+            <div style={{ display:"flex", gap:8 }}>
+              <button style={{ ...s.btn, ...s.btnGhost, flex:1, fontSize:13 }} onClick={() => router.push("/lobby")}>🏟️ Open Matches</button>
+              <button style={{ ...s.btn, ...s.btnGhost, flex:1, fontSize:13 }} onClick={() => router.push("/leaderboard")}>🏆 Leaderboard</button>
+            </div>
           </>
         )}
 
@@ -287,6 +405,10 @@ export default function Page() {
               Bet: <strong style={{ color:"var(--ton-blue)" }}>{betAmount.toFixed(2)} BSA USD</strong><br/>
               Share this ID with your opponent.
             </p>
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", background:"var(--bg)", border:"1px solid var(--border)", borderRadius:8, padding:"8px 12px" }}>
+              <span style={{ fontSize:12, color:"var(--text-muted)" }}>Expires in</span>
+              <span style={{ fontFamily:"var(--font-mono)", fontSize:14, fontWeight:600, color: timeLeft < "1:00" ? "var(--warning)" : "var(--text-secondary)" }}>{timeLeft}</span>
+            </div>
             <button style={s.btn} onClick={shareMatch}>📤 Share Match ID</button>
             <div style={{ display:"flex", alignItems:"center", gap:8, justifyContent:"center" }}>
               <div style={s.spinnerSm} />
@@ -335,11 +457,11 @@ export default function Page() {
               </div>
               <div style={s.previewItem}>
                 <div style={s.previewLabel}>Entry Fee</div>
-                <div style={{ ...s.previewValue, color:"var(--ton-blue)" }}>{joinMatchInfo.betAmount.toFixed(2)} BSA USD</div>
+                <div style={{ ...s.previewValue, color:"var(--ton-blue)" }}>{joinMatchInfo.betAmount.toFixed(2)} BSA</div>
               </div>
               <div style={s.previewItem}>
-                <div style={s.previewLabel}>Prize Pool</div>
-                <div style={{ ...s.previewValue, color:"var(--ton-blue)" }}>{(joinMatchInfo.betAmount * 2 * 0.9).toFixed(3)} BSA USD</div>
+                <div style={s.previewLabel}>Prize</div>
+                <div style={{ ...s.previewValue, color:"var(--ton-blue)" }}>{(joinMatchInfo.betAmount * 2 * 0.9).toFixed(3)} BSA</div>
               </div>
             </div>
             {!wallet && <div style={s.warnBox}>⚠ Connect wallet first</div>}
@@ -356,6 +478,16 @@ export default function Page() {
         )}
       </div>
     </main>
+  );
+}
+
+export default function Page() {
+  return (
+    <Suspense fallback={
+      <div style={{ minHeight:"100vh", background:"var(--bg)" }} />
+    }>
+      <LobbyContent />
+    </Suspense>
   );
 }
 

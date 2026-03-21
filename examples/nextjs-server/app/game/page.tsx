@@ -14,6 +14,23 @@ const MIN_BLOCK_WIDTH = 20;
 const INITIAL_SPEED = 2.5;
 const SPEED_INCREMENT = 0.4;
 
+const CONFETTI = Array.from({ length: 24 }, (_, i) => ({
+  left: (i * 4.167) % 100,
+  delay: (i * 0.063) % 1.2,
+  color: ["#0098EA","#39C688","#FFA940","#FF5C5C","#A855F7","#F59E0B"][i % 6],
+  size: 6 + (i % 4) * 2,
+  dur: 1.5 + (i % 5) * 0.15,
+}));
+
+const haptic = {
+  impact: (style: "light"|"medium"|"heavy" = "medium") =>
+    (window as any).Telegram?.WebApp?.HapticFeedback?.impactOccurred(style),
+  success: () =>
+    (window as any).Telegram?.WebApp?.HapticFeedback?.notificationOccurred("success"),
+  error: () =>
+    (window as any).Telegram?.WebApp?.HapticFeedback?.notificationOccurred("error"),
+};
+
 function makeSeededRandom(seed: number) {
   let s = seed;
   return () => {
@@ -60,6 +77,7 @@ function GameContent() {
     player2Score: number;
     prizeAmount: string;
     payoutTxHash?: string;
+    betAmount?: number;
   } | null>(null);
 
   const initGame = useCallback(() => {
@@ -146,6 +164,7 @@ function GameContent() {
       draw();
       setFinalScore(g.score);
       setStatus("finished");
+      haptic.error();
       return;
     }
 
@@ -153,6 +172,7 @@ function GameContent() {
     g.stack.push(placedBlock);
     g.score += 1;
     setScore(g.score);
+    haptic.impact(overlap > 100 ? "medium" : "light");
     if (g.score % 5 === 0) g.speed += SPEED_INCREMENT;
 
     if (overlap < MIN_BLOCK_WIDTH) {
@@ -161,6 +181,7 @@ function GameContent() {
       draw();
       setFinalScore(g.score);
       setStatus("finished");
+      haptic.error();
       return;
     }
 
@@ -184,12 +205,15 @@ function GameContent() {
         const matchRes = await fetch(`/api/match/${matchId}`);
         const matchData = await matchRes.json();
         const prizeAmount = Math.floor(Number(matchData.entryFee) * 2 * 0.9).toString();
+        const isWin = matchData.winnerId === role;
+        if (isWin) haptic.success();
         setMatchResult({
           winnerId: matchData.winnerId,
           player1Score: matchData.player1?.score ?? 0,
           player2Score: matchData.player2?.score ?? 0,
           prizeAmount,
           payoutTxHash: data.payoutTxHash,
+          betAmount: matchData.betAmount,
         });
       }
     } catch (err) {
@@ -197,7 +221,7 @@ function GameContent() {
     } finally {
       setSubmitting(false);
     }
-  }, [matchId, playerAddress, submitting, submitted]);
+  }, [matchId, playerAddress, submitting, submitted, role]);
 
   useEffect(() => {
     if (!submitted || matchResult || !matchId) return;
@@ -210,12 +234,15 @@ function GameContent() {
           const prizeAmount = data.entryFee
             ? Math.floor(Number(data.entryFee) * 2 * 0.9).toString()
             : "18000000";
+          const isWin = data.winnerId === role;
+          if (isWin) haptic.success();
           setMatchResult({
             winnerId: data.winnerId,
             player1Score: data.player1?.score ?? 0,
             player2Score: data.player2?.score ?? 0,
             prizeAmount,
             payoutTxHash: data.payoutTxHash ?? undefined,
+            betAmount: data.betAmount,
           });
         }
       } catch (err) {
@@ -223,7 +250,7 @@ function GameContent() {
       }
     }, 2000);
     return () => clearInterval(interval);
-  }, [submitted, matchResult, matchId]);
+  }, [submitted, matchResult, matchId, role]);
 
   useEffect(() => {
     if (status === "finished" && !submitted) submitScore(finalScore);
@@ -243,12 +270,20 @@ function GameContent() {
   if (matchResult) {
     const isTie = matchResult.winnerId === "tie";
     const isWinner = !isTie && matchResult.winnerId === role;
-const myScore = role === "player1" ? matchResult.player1Score : matchResult.player2Score;
-const opponentScore = role === "player1" ? matchResult.player2Score : matchResult.player1Score;
+    const myScore = role === "player1" ? matchResult.player1Score : matchResult.player2Score;
+    const opponentScore = role === "player1" ? matchResult.player2Score : matchResult.player1Score;
     const prizeDisplay = (Number(matchResult.prizeAmount) / 1_000_000_000).toFixed(3);
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || "";
 
     return (
       <div style={s.page}>
+        {isWinner && (
+          <div style={{ position:"fixed", top:0, left:0, width:"100%", height:"100%", pointerEvents:"none", overflow:"hidden", zIndex:10 }}>
+            {CONFETTI.map((p, i) => (
+              <div key={i} style={{ position:"absolute", left:`${p.left}%`, top:-20, width:p.size, height:p.size, background:p.color, borderRadius:2, animation:`confetti-fall ${p.dur}s ${p.delay}s ease-in both` }} />
+            ))}
+          </div>
+        )}
         <div style={s.resultCard}>
           <div style={{ fontSize:48, marginBottom:8 }}>
             {isTie ? "🤝" : isWinner ? "🏆" : "😔"}
@@ -269,9 +304,7 @@ const opponentScore = role === "player1" ? matchResult.player2Score : matchResul
           </div>
           {isTie && (
             <div style={s.prizeBox}>
-              <div style={{ fontSize:13, color:"var(--warning)" }}>
-                🤝 Tie! Your entry fee will be refunded.
-              </div>
+              <div style={{ fontSize:13, color:"var(--warning)" }}>🤝 Tie! Your entry fee will be refunded.</div>
             </div>
           )}
           {isWinner && !isTie && (
@@ -287,7 +320,20 @@ const opponentScore = role === "player1" ? matchResult.player2Score : matchResul
               )}
             </div>
           )}
-          <button style={s.btn} onClick={() => router.push("/")}>Back to Lobby</button>
+          {isWinner && (
+            <button style={{ ...s.btn, background:"var(--bg-card)", border:"1px solid var(--border-active)", color:"var(--ton-blue)" }} onClick={() => {
+              const msg = `I just won ${prizeDisplay} BSA USD in Stack Duel! 🏆 Challenge me!`;
+              (window as any).Telegram?.WebApp?.openTelegramLink(`https://t.me/share/url?url=${encodeURIComponent(appUrl)}&text=${encodeURIComponent(msg)}`);
+            }}>
+              📤 Share Win
+            </button>
+          )}
+          <button style={s.btn} onClick={() => router.push(`/?presetMode=stack&presetBet=${matchResult.betAmount ?? 0.01}`)}>
+            ⚔️ Rematch
+          </button>
+          <button style={{ ...s.btn, background:"transparent", border:"1px solid var(--border)", color:"var(--text-secondary)" }} onClick={() => router.push("/")}>
+            Back to Lobby
+          </button>
         </div>
       </div>
     );
@@ -359,14 +405,14 @@ export default function GamePage() {
 
 const s: Record<string, React.CSSProperties> = {
   page: { minHeight:"100vh", background:"var(--bg)", display:"flex", alignItems:"center", justifyContent:"center", padding:16 },
-  resultCard: { background:"var(--bg-card)", border:"1px solid var(--border)", borderRadius:16, padding:28, width:"100%", maxWidth:320, display:"flex", flexDirection:"column", alignItems:"center", textAlign:"center", gap:12 },
+  resultCard: { background:"var(--bg-card)", border:"1px solid var(--border)", borderRadius:16, padding:28, width:"100%", maxWidth:320, display:"flex", flexDirection:"column", alignItems:"center", textAlign:"center", gap:10 },
   resultTitle: { fontSize:26, fontWeight:700, color:"var(--text-primary)", fontFamily:"var(--font-sans)" },
   scoreRow: { display:"flex", gap:20, alignItems:"center", margin:"8px 0" },
   scoreBox: { background:"var(--bg)", border:"1px solid var(--border)", borderRadius:10, padding:"10px 20px", minWidth:80 },
   scoreLabel: { fontSize:10, color:"var(--text-muted)", textTransform:"uppercase" as const, letterSpacing:"0.07em", marginBottom:4 },
   scoreNum: { fontSize:28, fontWeight:700, color:"var(--text-primary)", fontFamily:"var(--font-mono)" },
   prizeBox: { background:"rgba(57,198,136,0.08)", border:"1px solid rgba(57,198,136,0.25)", borderRadius:10, padding:"12px 20px", width:"100%" },
-  btn: { width:"100%", padding:"13px 16px", background:"var(--ton-blue)", border:"none", borderRadius:10, color:"#fff", fontSize:15, fontWeight:600, fontFamily:"var(--font-sans)", cursor:"pointer", marginTop:4 },
+  btn: { width:"100%", padding:"13px 16px", background:"var(--ton-blue)", border:"none", borderRadius:10, color:"#fff", fontSize:15, fontWeight:600, fontFamily:"var(--font-sans)", cursor:"pointer" },
   scoreOverlay: { position:"absolute" as const, top:12, left:"50%", transform:"translateX(-50%)", fontSize:32, fontWeight:700, color:"rgba(255,255,255,0.9)", fontFamily:"var(--font-mono)", pointerEvents:"none" as const, textShadow:"0 2px 8px rgba(0,0,0,0.5)" },
   spinner: { width:28, height:28, border:"3px solid var(--border)", borderTopColor:"var(--ton-blue)", borderRadius:"50%", animation:"spin 0.8s linear infinite" },
 };

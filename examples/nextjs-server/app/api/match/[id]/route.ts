@@ -1,4 +1,5 @@
-import { getMatch } from "../../../../lib/match-store";
+import { getMatch, setPayoutTx } from "../../../../lib/match-store";
+import { sendPayout } from "../../../../lib/payout";
 
 export async function GET(
   _request: Request,
@@ -11,6 +12,16 @@ export async function GET(
     return Response.json({ error: "Match not found" }, { status: 404 });
   }
 
+  // If the match just expired and no refund has been sent yet, fire P1 refund
+  if (match.status === "expired" && !match.payoutTxHash) {
+    try {
+      await sendPayout(match.player1.address, match.entryFee);
+      await setPayoutTx(id, "expired_refund");
+    } catch (err: any) {
+      console.error("[id] Expiry refund failed:", err.message);
+    }
+  }
+
   return Response.json({
     id: match.id,
     status: match.status,
@@ -18,6 +29,7 @@ export async function GET(
     seed: match.seed,
     entryFee: match.entryFee,
     betAmount: match.betAmount ?? 0.01,
+    expiresAt: match.expiresAt,
     player1: {
       address: match.player1.address,
       score: match.player1.score,

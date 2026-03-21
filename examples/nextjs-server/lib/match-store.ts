@@ -1,4 +1,6 @@
-export type MatchStatus = "waiting" | "playing" | "finished";
+import { redis } from "./redis";
+
+export type MatchStatus = "waiting" | "playing" | "finished" | "expired";
 export type GameMode = "stack" | "memory" | "reaction";
 
 export interface PlayerState {
@@ -20,21 +22,29 @@ export interface Match {
   winnerId: string | null;
   payoutTxHash: string | null;
   createdAt: number;
+  expiresAt: number; // ms timestamp — match auto-cancels if still waiting past this
 }
 
-const g = global as any;
-if (!g.__matches) g.__matches = new Map<string, Match>();
-const matches: Map<string, Match> = g.__matches;
+const MATCH_TTL = 3600;           // Redis TTL: 1 hour (seconds)
+const WAITING_TIMEOUT = 5 * 60 * 1000; // 5 minutes in ms
+const WAITING_KEY = "matches:waiting";
 
-export function createMatch(
+function matchKey(id: string) { return `match:${id}`; }
+
+async function saveMatch(match: Match): Promise<void> {
+  await redis.set(matchKey(match.id), match, { ex: MATCH_TTL });
+}
+
+export async function createMatch(
   player1Address: string,
   paymentBoc: string,
   entryFee: string,
   gameMode: GameMode = "stack",
   betAmount: number = 0.01,
-): Match {
+): Promise<Match> {
   const id = Math.random().toString(36).substring(2, 8).toUpperCase();
   const seed = Math.floor(Math.random() * 1_000_000);
+  const now = Date.now();
 
   const match: Match = {
     id,
@@ -47,23 +57,35 @@ export function createMatch(
     seed,
     winnerId: null,
     payoutTxHash: null,
-    createdAt: Date.now(),
+    createdAt: now,
+    expiresAt: now + WAITING_TIMEOUT,
   };
 
-  matches.set(id, match);
+  await saveMatch(match);
+  await redis.sadd(WAITING_KEY, match.id);
   return match;
 }
 
-export function getMatch(id: string): Match | undefined {
-  return matches.get(id);
+export async function getMatch(id: string): Promise<Match | undefined> {
+  const data = await redis.get<Match>(matchKey(id));
+  if (!data) return undefined;
+
+  // Auto-expire matches that have timed out while waiting
+  if (data.status === "waiting" && Date.now() > data.expiresAt) {
+    data.status = "expired";
+    await saveMatch(data);
+    await redis.srem(WAITING_KEY, data.id);
+  }
+
+  return data;
 }
 
-export function joinMatch(
+export async function joinMatch(
   id: string,
   player2Address: string,
   paymentBoc: string,
-): Match | null {
-  const match = matches.get(id);
+): Promise<Match | null> {
+  const match = await getMatch(id);
   if (!match) return null;
   if (match.status !== "waiting") return null;
   if (match.player2) return null;
@@ -71,17 +93,18 @@ export function joinMatch(
 
   match.player2 = { address: player2Address, score: null, finished: false, paymentBoc };
   match.status = "playing";
-  matches.set(id, match);
+  await saveMatch(match);
+  await redis.srem(WAITING_KEY, match.id);
   return match;
 }
 
-export function submitScore(
+export async function submitScore(
   id: string,
   playerAddress: string,
   score: number,
   role: string,
-): Match | null {
-  const match = matches.get(id);
+): Promise<Match | null> {
+  const match = await getMatch(id);
   if (!match) return null;
   if (match.status !== "playing") return null;
 
@@ -106,14 +129,21 @@ export function submitScore(
     }
   }
 
-  matches.set(id, match);
+  await saveMatch(match);
   return match;
 }
 
-export function setPayoutTx(id: string, txHash: string): void {
-  const match = matches.get(id);
+export async function setPayoutTx(id: string, txHash: string): Promise<void> {
+  const match = await getMatch(id);
   if (match) {
     match.payoutTxHash = txHash;
-    matches.set(id, match);
+    await saveMatch(match);
   }
+}
+
+export async function getWaitingMatches(): Promise<Match[]> {
+  const ids = await redis.smembers(WAITING_KEY) as string[];
+  if (!ids || ids.length === 0) return [];
+  const matches = await Promise.all(ids.map(id => getMatch(id)));
+  return matches.filter((m): m is Match => m !== undefined && m.status === "waiting");
 }
