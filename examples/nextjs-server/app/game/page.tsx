@@ -243,7 +243,7 @@ function GameContent() {
   if (matchResult) {
     const isTie = matchResult.winnerId === "tie";
     const isWinner = !isTie && matchResult.winnerId === role;
-    const myScore = role === "player1" ? matchResult.player1Score : matchResult.player2Score;
+    const myScore = role === "player1" ? matchResult.player2Score : matchResult.player1Score;
     const opponentScore = role === "player1" ? matchResult.player2Score : matchResult.player1Score;
     const prizeDisplay = (Number(matchResult.prizeAmount) / 1_000_000_000).toFixed(3);
 
