@@ -175,7 +175,7 @@ function GameContent() {
       const res = await fetch("/api/match/score", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ matchId, playerAddress, score: scoreToSubmit }),
+        body: JSON.stringify({ matchId, playerAddress, score: scoreToSubmit, role }),
       });
       const data = await res.json();
       setSubmitted(true);
@@ -243,8 +243,8 @@ function GameContent() {
   if (matchResult) {
     const isTie = matchResult.winnerId === "tie";
     const isWinner = !isTie && matchResult.winnerId === role;
-    const myScore = role === "player1" ? matchResult.player2Score : matchResult.player1Score;
-    const opponentScore = role === "player1" ? matchResult.player2Score : matchResult.player1Score;
+const myScore = role === "player1" ? matchResult.player1Score : matchResult.player2Score;
+const opponentScore = role === "player1" ? matchResult.player2Score : matchResult.player1Score;
     const prizeDisplay = (Number(matchResult.prizeAmount) / 1_000_000_000).toFixed(3);
 
     return (

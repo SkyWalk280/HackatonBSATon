@@ -3,7 +3,7 @@ import { sendPayout } from "../../../../lib/payout";
 
 export async function POST(request: Request) {
   try {
-    const { matchId, playerAddress, score } = await request.json();
+    const { matchId, playerAddress, score, role } = await request.json();
 
     if (!matchId || !playerAddress || score === undefined) {
       return Response.json(
@@ -12,7 +12,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const match = await submitScore(matchId, playerAddress, score);
+    const match = await submitScore(matchId, playerAddress, score, role);
 
     if (!match) {
       return Response.json(

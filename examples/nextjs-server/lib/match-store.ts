@@ -78,34 +78,33 @@ export async function submitScore(
   id: string,
   playerAddress: string,
   score: number,
+  role: string,
 ): Promise<Match | null> {
   const match = await load(id);
-  if (!match || match.status !== "playing") return null;
+  if (!match) return null;
+  if (match.status !== "playing") return null;
 
-  if (match.player1.address === playerAddress && !match.player1.finished) {
+  // Use role directly — no address matching ambiguity
+  if (role === "player1" && !match.player1.finished) {
     match.player1.score = score;
     match.player1.finished = true;
-  } else if (match.player2?.address === playerAddress && !match.player2.finished) {
-    match.player2.score = score;
-    match.player2.finished = true;
-  } else if (match.player1.finished && match.player2 && !match.player2.finished) {
+  } else if (role === "player2" && match.player2 && !match.player2.finished) {
     match.player2.score = score;
     match.player2.finished = true;
   } else {
     return null;
   }
 
-if (match.player1.finished && match.player2?.finished) {
-  match.status = "finished";
-  const p1 = match.player1.score ?? 0;
-  const p2 = match.player2.score ?? 0;
-  
-  if (p1 === p2) {
-    match.winnerId = "tie"; 
-  } else {
-    match.winnerId = p1 > p2 ? "player1" : "player2";
+  if (match.player1.finished && match.player2?.finished) {
+    match.status = "finished";
+    const p1 = match.player1.score ?? 0;
+    const p2 = match.player2.score ?? 0;
+    if (p1 === p2) {
+      match.winnerId = "tie";
+    } else {
+      match.winnerId = p1 > p2 ? "player1" : "player2";
+    }
   }
-}
 
   await save(match);
   return match;
