@@ -15,7 +15,7 @@ export async function POST(request: Request) {
 
     if (!match) {
       return Response.json(
-        { error: "Match not found, already full, or you are the creator" },
+        { error: "Match not found or already started" },
         { status: 400 }
       );
     }

@@ -67,6 +67,7 @@ export function joinMatch(
   if (!match) return null;
   if (match.status !== "waiting") return null;
   if (match.player2) return null;
+  // No address uniqueness check — same wallet can join its own match (useful for testing)
 
   match.player2 = { address: player2Address, score: null, finished: false, paymentBoc };
   match.status = "playing";
