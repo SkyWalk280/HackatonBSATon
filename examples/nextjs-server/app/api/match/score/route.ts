@@ -1,5 +1,5 @@
-import { submitScore, getMatch, setPayoutTx } from "../../../lib/match-store";
-import { sendPayout } from "../../../lib/payout";
+import { submitScore, getMatch, setPayoutTx } from "../../../../lib/match-store";
+import { sendPayout } from "../../../../lib/payout";
 
 export async function POST(request: Request) {
   try {
@@ -12,7 +12,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const match = submitScore(matchId, playerAddress, score);
+    const match = await submitScore(matchId, playerAddress, score);
 
     if (!match) {
       return Response.json(

@@ -1,5 +1,5 @@
 
-import { createMatch } from "../../../lib/match-store";
+import { createMatch } from "../../../../lib/match-store";
 
 const ENTRY_FEE = "10000000";
 
@@ -14,7 +14,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const match = createMatch(playerAddress, paymentBoc, ENTRY_FEE);
+    const match = await createMatch(playerAddress, paymentBoc, ENTRY_FEE);
 
     return Response.json({
       matchId: match.id,
