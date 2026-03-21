@@ -57,6 +57,8 @@ function LobbyContent() {
   const [editingUsername, setEditingUsername] = useState(false);
   const [usernameInput, setUsernameInput] = useState("");
   const [usernameSaving, setUsernameSaving] = useState(false);
+  const [isPublic, setIsPublic] = useState(true);
+  const isPublicRef = useRef(true);
 
   useEffect(() => {
     const tg = (window as any).Telegram?.WebApp;
@@ -154,6 +156,7 @@ function LobbyContent() {
             paymentBoc: "verified",
             gameMode: currentMode,
             betAmount: currentBet,
+            isPublic: isPublicRef.current,
           }),
         });
         const match = await res.json();
@@ -368,6 +371,11 @@ function LobbyContent() {
               <button style={{ ...s.btn, ...s.btnGhost, flex:1, fontSize:13 }} onClick={() => router.push("/lobby")}>🏟️ Open Matches</button>
               <button style={{ ...s.btn, ...s.btnGhost, flex:1, fontSize:13 }} onClick={() => router.push("/leaderboard")}>🏆 Leaderboard</button>
             </div>
+            {wallet?.account?.address && (
+              <button style={{ ...s.btn, ...s.btnGhost, fontSize:13 }} onClick={() => router.push(`/profile/${encodeURIComponent(wallet.account.address)}`)}>
+                👤 My Profile
+              </button>
+            )}
           </>
         )}
 
@@ -383,6 +391,25 @@ function LobbyContent() {
               {" · "}Prize: <strong style={{ color:"var(--ton-blue)" }}>{prize} BSA USD</strong>
             </div>
             <p style={s.cardDesc}>Pay <strong style={{ color:"var(--ton-blue)" }}>{betAmount.toFixed(2)} BSA USD</strong> entry fee. You'll get a match ID to share.</p>
+            {/* Public / Private toggle */}
+            <div style={{ display:"flex", gap:6 }}>
+              {([true, false] as const).map(pub => (
+                <button key={String(pub)}
+                  onClick={() => { setIsPublic(pub); isPublicRef.current = pub; }}
+                  style={{
+                    flex:1, padding:"10px 8px",
+                    background: isPublic === pub ? (pub ? "rgba(57,198,136,0.15)" : "rgba(168,85,247,0.15)") : "var(--bg)",
+                    border: isPublic === pub ? `1px solid ${pub ? "rgba(57,198,136,0.4)" : "rgba(168,85,247,0.4)"}` : "1px solid var(--border)",
+                    borderRadius:8, color: isPublic === pub ? (pub ? "#39C688" : "#a855f7") : "var(--text-secondary)",
+                    fontSize:13, fontWeight:600, cursor:"pointer",
+                  }}>
+                  {pub ? "🌐 Public" : "🔒 Private"}
+                </button>
+              ))}
+            </div>
+            <div style={{ fontSize:11, color:"var(--text-muted)", textAlign:"center" as const }}>
+              {isPublic ? "Anyone can find and join this match in Open Matches" : "Only players with the Match ID can join"}
+            </div>
             {!wallet && <div style={s.warnBox}>⚠ Connect wallet first</div>}
             {createPayment.error && <div style={s.errBox}>⚠ {createPayment.error}</div>}
             <button style={{ ...s.btn, opacity:(!wallet||isCreating)?0.5:1 }} disabled={!wallet||isCreating} onClick={createPayment.execute}>
@@ -410,6 +437,7 @@ function LobbyContent() {
               <span style={{ fontFamily:"var(--font-mono)", fontSize:14, fontWeight:600, color: timeLeft < "1:00" ? "var(--warning)" : "var(--text-secondary)" }}>{timeLeft}</span>
             </div>
             <button style={s.btn} onClick={shareMatch}>📤 Share Match ID</button>
+            <button style={{ ...s.btn, ...s.btnSecondary }} onClick={() => router.push(`/spectate/${matchId}`)}>👁 Watch Live</button>
             <div style={{ display:"flex", alignItems:"center", gap:8, justifyContent:"center" }}>
               <div style={s.spinnerSm} />
               <span style={{ fontSize:12, color:"var(--text-muted)" }}>Polling for opponent...</span>

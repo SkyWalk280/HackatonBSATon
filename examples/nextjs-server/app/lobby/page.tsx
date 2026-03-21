@@ -198,7 +198,24 @@ export default function LobbyPage() {
                   </div>
                 </div>
 
-                {/* Join button */}
+                {/* Spectate + Join buttons */}
+                <div style={{ display: "flex", flexDirection: "column", gap: "6px", flexShrink: 0 }}>
+                <button
+                  onClick={() => router.push(`/spectate/${m.id}`)}
+                  style={{
+                    background: "rgba(255,255,255,0.07)",
+                    border: "1px solid rgba(255,255,255,0.12)",
+                    borderRadius: "10px",
+                    color: "rgba(255,255,255,0.7)",
+                    fontSize: "12px",
+                    fontWeight: 600,
+                    padding: "7px 12px",
+                    cursor: "pointer",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  👁 Watch
+                </button>
                 <button
                   onClick={() => joinMatch(m.id)}
                   style={{
@@ -216,6 +233,7 @@ export default function LobbyPage() {
                 >
                   Join ⚔️
                 </button>
+                </div>
               </div>
             );
           })}

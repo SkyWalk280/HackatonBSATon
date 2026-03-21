@@ -23,6 +23,7 @@ export interface Match {
   payoutTxHash: string | null;
   createdAt: number;
   expiresAt: number; // ms timestamp — match auto-cancels if still waiting past this
+  isPublic: boolean; // public matches appear in the open lobby; private ones do not
 }
 
 const MATCH_TTL = 3600;           // Redis TTL: 1 hour (seconds)
@@ -41,6 +42,7 @@ export async function createMatch(
   entryFee: string,
   gameMode: GameMode = "stack",
   betAmount: number = 0.01,
+  isPublic: boolean = true,
 ): Promise<Match> {
   const id = Math.random().toString(36).substring(2, 8).toUpperCase();
   const seed = Math.floor(Math.random() * 1_000_000);
@@ -59,6 +61,7 @@ export async function createMatch(
     payoutTxHash: null,
     createdAt: now,
     expiresAt: now + WAITING_TIMEOUT,
+    isPublic,
   };
 
   await saveMatch(match);
@@ -145,5 +148,5 @@ export async function getWaitingMatches(): Promise<Match[]> {
   const ids = await redis.smembers(WAITING_KEY) as string[];
   if (!ids || ids.length === 0) return [];
   const matches = await Promise.all(ids.map(id => getMatch(id)));
-  return matches.filter((m): m is Match => m !== undefined && m.status === "waiting");
+  return matches.filter((m): m is Match => m !== undefined && m.status === "waiting" && m.isPublic !== false);
 }

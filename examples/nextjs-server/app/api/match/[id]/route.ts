@@ -43,5 +43,6 @@ export async function GET(
     winnerId: match.winnerId,
     payoutTxHash: match.payoutTxHash,
     createdAt: match.createdAt,
+    isPublic: match.isPublic ?? true,
   });
 }

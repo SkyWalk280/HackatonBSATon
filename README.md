@@ -129,18 +129,21 @@ telegram-miniapp/
         │   ├── game/page.tsx             Stack Duel game (Canvas)
         │   ├── memory/page.tsx           Memory Grid game
         │   ├── reaction/page.tsx         Reaction Time game
-        │   ├── lobby/page.tsx            Open matches browser
-        │   ├── leaderboard/page.tsx      Global leaderboard (top 10 by wins)
+        │   ├── lobby/page.tsx            Open matches browser (public matches only)
+        │   ├── leaderboard/page.tsx      Global leaderboard — top 10, clickable profiles
+        │   ├── spectate/[matchId]/       Live match spectating — polls every 2s
+        │   ├── profile/[address]/        Player profile — stats, win rate, best scores
         │   ├── hooks/usePayment.ts       x402 payment hook
         │   └── api/
         │       ├── match-entry/[bet]/    Payment gate — dynamic per bet amount
-        │       ├── match/create/         Create match (post-payment)
+        │       ├── match/create/         Create match (post-payment); accepts isPublic
         │       ├── match/join/           Join match (post-payment)
         │       ├── match/[id]/           Poll state; triggers expiry refund
-        │       ├── match/score/          Submit score; triggers payout + leaderboard
-        │       ├── matches/open/         List waiting matches
+        │       ├── match/score/          Submit score; payout + leaderboard + stats update
+        │       ├── matches/open/         List public waiting matches only
         │       ├── leaderboard/          Top 10 sorted set (resolves usernames)
         │       ├── profile/username/     GET/POST display name per wallet address
+        │       ├── profile/stats/        GET player stats (wins, losses, earnings, bests)
         │       └── facilitator/          verify + settle endpoints
         └── lib/
             ├── redis.ts                  Shared Upstash Redis client
@@ -158,9 +161,12 @@ telegram-miniapp/
 - **Serverless-safe** — all match state in Redis; works across Vercel Lambda cold starts
 - **Match expiry** — 5-minute waiting timeout with live countdown; automatic P1 refund
 - **Rematch flow** — results screen → Rematch jumps straight to create-match with mode and bet pre-filled
-- **Open lobby** — browse and join any waiting match; live list refreshes every 5 seconds
-- **Global leaderboard** — Redis sorted set; top 10 by wins; shows display names when set
-- **Display names** — players set a 2–20 char username stored in Redis, shown on leaderboard
+- **Public / private matches** — creator chooses visibility; private matches are invite-only (share the match ID); public matches appear in the open lobby
+- **Open lobby** — browse and join any public waiting match; live list refreshes every 5 seconds
+- **Live spectating** — anyone can open `/spectate/[matchId]` to watch a match in real time; polls every 2 s and shows each player's status, score, and the winner once both finish
+- **Player profiles** — `/profile/[address]` shows win/loss/tie record, total BSA USD earnings, favourite game mode, per-mode match counts, and best scores; accessible from leaderboard entries
+- **Global leaderboard** — Redis sorted set; top 10 by wins; shows display names when set; rows link to player profiles
+- **Display names** — players set a 2–20 char username stored in Redis, shown on leaderboard and spectate view
 - **Haptic feedback** — native Telegram WebApp haptics on every game action
 - **Win confetti** — pure CSS `@keyframes` confetti burst on victory
 - **Share win** — pre-filled Telegram share message with prize amount and app link
@@ -177,6 +183,7 @@ telegram-miniapp/
 | `matches:waiting` | Set | Match IDs currently in `waiting` status |
 | `leaderboard` | Sorted Set | member = wallet address, score = win count |
 | `username:{address}` | String | Display name for a wallet address |
+| `stats:{address}` | String (JSON) | Per-player stats: matchesPlayed, wins, losses, ties, totalEarningsNano, gameModeCounts, bestScores |
 
 ---
 

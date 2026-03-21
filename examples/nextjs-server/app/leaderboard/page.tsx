@@ -223,10 +223,12 @@ export default function LeaderboardPage() {
             return (
               <div
                 key={entry.rank}
+                onClick={() => router.push(`/profile/${encodeURIComponent(entry.address)}`)}
                 style={{
                   display: "flex",
                   alignItems: "center",
                   gap: "14px",
+                  cursor: "pointer",
                   background: isMe
                     ? "rgba(251,191,36,0.08)"
                     : isTop3
