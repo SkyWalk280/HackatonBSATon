@@ -2,9 +2,10 @@ import { getMatch } from "../../../../lib/match-store";
 
 export async function GET(
   _request: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
-  const match = getMatch(params.id);
+  const { id } = await params;
+  const match = getMatch(id);
 
   if (!match) {
     return Response.json({ error: "Match not found" }, { status: 404 });
