@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+import { resolveTonName } from "../../../lib/tonDns";
 
 const MODE_EMOJI: Record<string, string> = { stack: "🧱", memory: "🧠", reaction: "⚡" };
 const MODE_LABEL: Record<string, string> = { stack: "Stack Duel", memory: "Memory Grid", reaction: "Reaction Time" };
@@ -95,6 +96,17 @@ export default function SpectatePage() {
       if (data.player2?.address && !usernames.p2) {
         fetch(`/api/profile/username?address=${encodeURIComponent(data.player2.address)}`)
           .then(r => r.json()).then(d => setUsernames(u => ({ ...u, p2: d.username ?? null }))).catch(() => {});
+      }
+      // Fallback to .ton DNS if no display name set
+      if (data.player1?.address && !usernames.p1) {
+        resolveTonName(data.player1.address)
+          .then(name => { if (name) setUsernames(u => ({ ...u, p1: u.p1 ?? name })); })
+          .catch(() => {});
+      }
+      if (data.player2?.address && !usernames.p2) {
+        resolveTonName(data.player2.address)
+          .then(name => { if (name) setUsernames(u => ({ ...u, p2: u.p2 ?? name })); })
+          .catch(() => {});
       }
     } catch (e: any) { setError(e.message); }
   }

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTonWallet } from "@tonconnect/ui-react";
+import { resolveTonName } from "../../lib/tonDns";
 
 interface LeaderboardEntry {
   rank: number;
@@ -38,7 +39,15 @@ export default function LeaderboardPage() {
     try {
       const r = await fetch("/api/leaderboard");
       const data = await r.json();
-      setEntries(data.entries ?? []);
+      // Resolve .ton DNS names for entries without a username
+      const resolved = data.entries ?? [];
+      const tonNames = await Promise.all(
+        resolved.map((e: any) => e.username ? Promise.resolve(null) : resolveTonName(e.address))
+      );
+      setEntries(resolved.map((e: any, i: number) => ({
+        ...e,
+        username: e.username ?? tonNames[i],
+      })));
       if (data.error) setError(data.error);
     } catch (e: any) {
       setError(e.message);

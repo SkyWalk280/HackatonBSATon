@@ -1,8 +1,11 @@
 "use client";
 
 import { useEffect, useCallback, useState, useRef, Suspense } from "react";
-import { useSearchParams, useRouter } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { useTonWallet } from "@tonconnect/ui-react";
+import { sounds } from "../../lib/sounds";
+import { computeGameHash } from "../../lib/gameHash";
+import ResultScreen from "../components/ResultScreen";
 
 const ROUNDS = 8;
 const TARGET_SIZE = 80;
@@ -11,14 +14,6 @@ const MAX_DELAY = 3000;
 const MISS_TIMEOUT = 3000;
 const MISS_PENALTY = 3000;
 const SCORE_BASE = 100_000;
-
-const CONFETTI = Array.from({ length: 24 }, (_, i) => ({
-  left: (i * 4.167) % 100,
-  delay: (i * 0.063) % 1.2,
-  color: ["#0098EA","#39C688","#FFA940","#FF5C5C","#A855F7","#F59E0B"][i % 6],
-  size: 6 + (i % 4) * 2,
-  dur: 1.5 + (i % 5) * 0.15,
-}));
 
 const haptic = {
   impact: (style: "light"|"medium"|"heavy" = "medium") =>
@@ -52,7 +47,6 @@ type Phase = "waiting" | "countdown" | "get_ready" | "active" | "too_early" | "m
 
 function ReactionContent() {
   const searchParams = useSearchParams();
-  const router = useRouter();
   const wallet = useTonWallet();
 
   const matchId = searchParams.get("matchId");
@@ -75,6 +69,7 @@ function ReactionContent() {
     prizeAmount: string;
     payoutTxHash?: string;
     betAmount?: number;
+    winStreak?: number;
   } | null>(null);
 
   const roundsData = useRef(generateRounds(seed));
@@ -100,6 +95,7 @@ function ReactionContent() {
         setLastReaction(MISS_PENALTY);
         setPhase("missed");
         haptic.error();
+        sounds.buzzer();
         setReactionTimes(prev => {
           const newTimes = [...prev, MISS_PENALTY];
           const next = roundIdx + 1;
@@ -135,6 +131,7 @@ function ReactionContent() {
     if (missTimeout.current) clearTimeout(missTimeout.current);
     const reactionMs = Date.now() - targetShownAt.current;
     haptic.impact(reactionMs < 300 ? "heavy" : "medium");
+    sounds.ding();
     setLastReaction(reactionMs);
     setTargetVisible(false);
     setPhase("correct");
@@ -155,6 +152,7 @@ function ReactionContent() {
       setTargetVisible(false);
       setPhase("too_early");
       haptic.warning();
+      sounds.buzzer();
       setTimeout(() => startRoundRef.current(round), 1200);
       return;
     }
@@ -164,6 +162,7 @@ function ReactionContent() {
     setLastReaction(MISS_PENALTY);
     setPhase("missed");
     haptic.error();
+    sounds.buzzer();
     setReactionTimes(prev => {
       const newTimes = [...prev, MISS_PENALTY];
       const next = round + 1;
@@ -178,11 +177,13 @@ function ReactionContent() {
     setSubmitted(true);
     const avg = Math.round(times.reduce((a, b) => a + b, 0) / times.length);
     const invertedScore = SCORE_BASE - avg;
+    const timestamp = Date.now();
+    const gameHash = await computeGameHash(seed, times, invertedScore, timestamp).catch(() => "");
     try {
       const res = await fetch("/api/match/score", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ matchId, playerAddress, score: invertedScore, role }),
+        body: JSON.stringify({ matchId, playerAddress, score: invertedScore, role, gameHash }),
       });
       const data = await res.json();
       if (data.status === "finished") {
@@ -190,7 +191,15 @@ function ReactionContent() {
         const matchData = await matchRes.json();
         const prizeAmount = Math.floor(Number(matchData.entryFee) * 2 * 0.9).toString();
         const isWin = matchData.winnerId === role;
-        if (isWin) haptic.success();
+        if (isWin) { haptic.success(); sounds.victory(); }
+        let winStreak = data.winStreak ?? 0;
+        if (isWin && playerAddress) {
+          try {
+            const sr = await fetch(`/api/profile/streak?address=${encodeURIComponent(playerAddress)}`);
+            const sd = await sr.json();
+            winStreak = sd.streak ?? winStreak;
+          } catch {}
+        }
         setMatchResult({
           winnerId: matchData.winnerId,
           player1Score: matchData.player1?.score ?? 0,
@@ -198,10 +207,11 @@ function ReactionContent() {
           prizeAmount,
           payoutTxHash: data.payoutTxHash,
           betAmount: matchData.betAmount,
+          winStreak,
         });
       }
     } catch (err) { console.error("Failed to submit score:", err); }
-  }, [matchId, playerAddress, submitted, role]);
+  }, [matchId, playerAddress, submitted, role, seed]);
 
   useEffect(() => {
     if (!submitted || matchResult || !matchId) return;
@@ -215,7 +225,7 @@ function ReactionContent() {
             ? Math.floor(Number(data.entryFee) * 2 * 0.9).toString()
             : "18000000";
           const isWin = data.winnerId === role;
-          if (isWin) haptic.success();
+          if (isWin) { haptic.success(); sounds.victory(); }
           setMatchResult({
             winnerId: data.winnerId,
             player1Score: data.player1?.score ?? 0,
@@ -223,6 +233,7 @@ function ReactionContent() {
             prizeAmount,
             payoutTxHash: data.payoutTxHash ?? undefined,
             betAmount: data.betAmount,
+            winStreak: 0,
           });
         }
       } catch {}
@@ -248,47 +259,27 @@ function ReactionContent() {
   if (matchResult) {
     const isTie = matchResult.winnerId === "tie";
     const isWinner = !isTie && matchResult.winnerId === role;
+    // For reaction, display the average ms (lower = better)
     const myInv = role === "player1" ? matchResult.player1Score : matchResult.player2Score;
     const oppInv = role === "player1" ? matchResult.player2Score : matchResult.player1Score;
     const prizeDisplay = (Number(matchResult.prizeAmount) / 1_000_000_000).toFixed(3);
     const appUrl = process.env.NEXT_PUBLIC_APP_URL || "";
 
     return (
-      <div style={s.page}>
-        {isWinner && (
-          <div style={{ position:"fixed", top:0, left:0, width:"100%", height:"100%", pointerEvents:"none", overflow:"hidden", zIndex:10 }}>
-            {CONFETTI.map((p, i) => (
-              <div key={i} style={{ position:"absolute", left:`${p.left}%`, top:-20, width:p.size, height:p.size, background:p.color, borderRadius:2, animation:`confetti-fall ${p.dur}s ${p.delay}s ease-in both` }} />
-            ))}
-          </div>
-        )}
-        <div style={s.card}>
-          <div style={{ fontSize:48, textAlign:"center" as const }}>{isTie ? "🤝" : isWinner ? "🏆" : "😔"}</div>
-          <div style={{ ...s.bigText, color: isTie ? "var(--warning)" : isWinner ? "var(--success)" : "var(--error)" }}>
-            {isTie ? "It's a Tie!" : isWinner ? "You Won!" : "You Lost"}
-          </div>
-          <div style={s.scoreRow}>
-            <div style={s.scoreBox}><div style={s.scoreLabel}>Your avg</div><div style={s.scoreNum}>{toMs(myInv)}<span style={{ fontSize:12 }}>ms</span></div></div>
-            <div style={{ fontSize:20, color:"var(--text-muted)", alignSelf:"center" }}>vs</div>
-            <div style={s.scoreBox}><div style={s.scoreLabel}>Opponent</div><div style={s.scoreNum}>{toMs(oppInv)}<span style={{ fontSize:12 }}>ms</span></div></div>
-          </div>
-          {isTie && <div style={s.prizeBox}><div style={{ fontSize:13, color:"var(--warning)" }}>🤝 Tie! Your entry fee will be refunded.</div></div>}
-          {isWinner && !isTie && (
-            <div style={s.prizeBox}>
-              <div style={{ fontSize:12, color:"var(--text-muted)", marginBottom:4 }}>Prize</div>
-              <div style={{ fontSize:22, fontWeight:700, color:"var(--success)", fontFamily:"var(--font-mono)" }}>{prizeDisplay} BSA USD</div>
-            </div>
-          )}
-          {isWinner && (
-            <button style={{ ...s.btn, background:"var(--bg-card)", border:"1px solid var(--border-active)", color:"var(--ton-blue)" }} onClick={() => {
-              const msg = `I just won ${prizeDisplay} BSA USD in Reaction Time! ⚡ Challenge me!`;
-              (window as any).Telegram?.WebApp?.openTelegramLink(`https://t.me/share/url?url=${encodeURIComponent(appUrl)}&text=${encodeURIComponent(msg)}`);
-            }}>📤 Share Win</button>
-          )}
-          <button style={s.btn} onClick={() => router.push(`/?presetMode=reaction&presetBet=${matchResult.betAmount ?? 0.01}`)}>⚔️ Rematch</button>
-          <button style={{ ...s.btn, background:"transparent", border:"1px solid var(--border)", color:"var(--text-secondary)" }} onClick={() => router.push("/")}>Back to Lobby</button>
-        </div>
-      </div>
+      <ResultScreen
+        isTie={isTie}
+        isWinner={isWinner}
+        myScore={toMs(myInv)}
+        opponentScore={toMs(oppInv)}
+        scoreUnit="ms"
+        prizeDisplay={prizeDisplay}
+        payoutTxHash={matchResult.payoutTxHash}
+        betAmount={matchResult.betAmount ?? 0.01}
+        mode="reaction"
+        shareText={`I just won ${prizeDisplay} BSA USD in Reaction Time! ⚡ Challenge me!`}
+        appUrl={appUrl}
+        winStreak={matchResult.winStreak ?? 0}
+      />
     );
   }
 
@@ -414,11 +405,6 @@ const s: Record<string, React.CSSProperties> = {
   page: { minHeight:"100vh", background:"var(--bg)", display:"flex", alignItems:"center", justifyContent:"center", padding:16 },
   card: { background:"var(--bg-card)", border:"1px solid var(--border)", borderRadius:16, padding:24, width:"100%", maxWidth:360, display:"flex", flexDirection:"column", alignItems:"center", textAlign:"center", gap:10 },
   bigText: { fontSize:22, fontWeight:700, color:"var(--text-primary)", fontFamily:"var(--font-sans)" },
-  scoreRow: { display:"flex", gap:20, alignItems:"center", margin:"8px 0" },
-  scoreBox: { background:"var(--bg)", border:"1px solid var(--border)", borderRadius:10, padding:"10px 16px", minWidth:90 },
-  scoreLabel: { fontSize:10, color:"var(--text-muted)", textTransform:"uppercase" as const, letterSpacing:"0.07em", marginBottom:4 },
-  scoreNum: { fontSize:26, fontWeight:700, color:"var(--text-primary)", fontFamily:"var(--font-mono)" },
-  prizeBox: { background:"rgba(57,198,136,0.08)", border:"1px solid rgba(57,198,136,0.25)", borderRadius:10, padding:"12px 20px", width:"100%" },
   btn: { width:"100%", padding:"13px 16px", background:"var(--ton-blue)", border:"none", borderRadius:10, color:"#fff", fontSize:15, fontWeight:600, cursor:"pointer" },
   spinner: { width:28, height:28, border:"3px solid var(--border)", borderTopColor:"var(--ton-blue)", borderRadius:"50%", animation:"spin 0.8s linear infinite" },
 };

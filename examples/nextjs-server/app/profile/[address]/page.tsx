@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+import { resolveTonName } from "../../../lib/tonDns";
 
 const MODE_EMOJI: Record<string, string> = { stack: "🧱", memory: "🧠", reaction: "⚡" };
 const MODE_LABEL: Record<string, string> = { stack: "Stack Duel", memory: "Memory Grid", reaction: "Reaction Time" };
@@ -45,6 +46,7 @@ export default function ProfilePage() {
   const decoded = decodeURIComponent(address);
 
   const [username, setUsername] = useState<string | null>(null);
+  const [tonName, setTonName] = useState<string | null>(null);
   const [stats, setStats] = useState<PlayerStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -56,6 +58,10 @@ export default function ProfilePage() {
         if (data.error) { setError(data.error); return; }
         setUsername(data.username ?? null);
         setStats(data.stats);
+        // Resolve .ton DNS name as fallback
+        if (!data.username) {
+          resolveTonName(decoded).then(name => { if (name) setTonName(name); }).catch(() => {});
+        }
       })
       .catch(e => setError(e.message))
       .finally(() => setLoading(false));
@@ -118,7 +124,7 @@ export default function ProfilePage() {
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontWeight: 800, fontSize: 18, marginBottom: 2 }}>
-                {username ?? "Anonymous"}
+                {username ?? tonName ?? "Anonymous"}
               </div>
               <div style={{ fontSize: 11, fontFamily: "monospace", opacity: 0.35, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {shortAddr(decoded)}

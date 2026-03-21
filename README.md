@@ -133,23 +133,29 @@ telegram-miniapp/
         │   ├── leaderboard/page.tsx      Global leaderboard — top 10, clickable profiles
         │   ├── spectate/[matchId]/       Live match spectating — polls every 2s
         │   ├── profile/[address]/        Player profile — stats, win rate, best scores
+        │   ├── components/
+        │   │   └── ResultScreen.tsx      Animated results screen (count-up, streak badge, double-or-nothing)
         │   ├── hooks/usePayment.ts       x402 payment hook
         │   └── api/
         │       ├── match-entry/[bet]/    Payment gate — dynamic per bet amount
         │       ├── match/create/         Create match (post-payment); accepts isPublic
         │       ├── match/join/           Join match (post-payment)
         │       ├── match/[id]/           Poll state; triggers expiry refund
-        │       ├── match/score/          Submit score; payout + leaderboard + stats update
+        │       ├── match/score/          Submit score; payout + leaderboard + stats + streak
         │       ├── matches/open/         List public waiting matches only
-        │       ├── leaderboard/          Top 10 sorted set (resolves usernames)
+        │       ├── leaderboard/          Top 10 sorted set (resolves usernames + TON DNS)
         │       ├── profile/username/     GET/POST display name per wallet address
         │       ├── profile/stats/        GET player stats (wins, losses, earnings, bests)
+        │       ├── profile/streak/       GET current win streak for a wallet address
         │       └── facilitator/          verify + settle endpoints
         └── lib/
             ├── redis.ts                  Shared Upstash Redis client
             ├── match-store.ts            Match CRUD — Redis-backed, async, with expiry
             ├── payout.ts                 Server-side BSA USD payout via TON
-            └── payment-config.ts         x402 config helper
+            ├── payment-config.ts         x402 config helper
+            ├── sounds.ts                 Web Audio API sound synthesis (no asset files)
+            ├── gameHash.ts               SHA-256 game fingerprint via Web Crypto API
+            └── tonDns.ts                 Resolve .ton DNS names via TON API
 ```
 
 ---
@@ -167,8 +173,14 @@ telegram-miniapp/
 - **Player profiles** — `/profile/[address]` shows win/loss/tie record, total BSA USD earnings, favourite game mode, per-mode match counts, and best scores; accessible from leaderboard entries
 - **Global leaderboard** — Redis sorted set; top 10 by wins; shows display names when set; rows link to player profiles
 - **Display names** — players set a 2–20 char username stored in Redis, shown on leaderboard and spectate view
+- **Win streak + fire badge** — consecutive wins tracked in Redis; 🔥 badge shown on the results screen after 2+ in a row
+- **Double or nothing** — after a win the results screen offers a one-click escalation to the next bet tier (0.01→0.05, 0.05→0.10, 0.10→0.50)
+- **Animated results screen** — scores count up from 0 simultaneously, prize box reveals after count-up, action buttons stagger in; shared `ResultScreen` component across all three games
+- **Sound effects** — synthesised via Web Audio API (no asset files): block thud, tile ding, buzzer, victory jingle; plays on every game event
+- **Game hash (anti-cheat)** — client computes `SHA-256(seed | moves | score | timestamp)` via Web Crypto API and submits it with each score; server stores the hash for audit; labelled "verifiable gameplay"
+- **TON DNS** — wallet addresses resolved to `.ton` names via TON API; shown on leaderboard, spectate view, and player profiles as fallback display names
 - **Haptic feedback** — native Telegram WebApp haptics on every game action
-- **Win confetti** — pure CSS `@keyframes` confetti burst on victory
+- **Win confetti** — pure CSS `@keyframes` confetti burst on victory (enhanced 30-piece multi-shape burst)
 - **Share win** — pre-filled Telegram share message with prize amount and app link
 - **Score anti-cheat** — server-side bounds validation per game mode before accepting scores
 - **Single-account testing** — no player address uniqueness check; one wallet can play both sides
@@ -184,6 +196,8 @@ telegram-miniapp/
 | `leaderboard` | Sorted Set | member = wallet address, score = win count |
 | `username:{address}` | String | Display name for a wallet address |
 | `stats:{address}` | String (JSON) | Per-player stats: matchesPlayed, wins, losses, ties, totalEarningsNano, gameModeCounts, bestScores |
+| `streak:{address}` | Integer | Current consecutive win streak; reset to 0 on loss or tie |
+| `gamehash:{matchId}:{role}` | String | Client-side SHA-256 game fingerprint submitted with each score; TTL 1 hour |
 
 ---
 
@@ -305,4 +319,3 @@ Built for the **BSA × TON Hackathon 2026** — TON generalist track.
 **Stack:** Next.js · TON · TonConnect · x402 · Upstash Redis · Vercel
 
 **Team:** Anthony Abou Haidar
-s

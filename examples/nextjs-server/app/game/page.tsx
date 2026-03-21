@@ -1,8 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useCallback, useState, Suspense } from "react";
-import { useSearchParams, useRouter } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { useTonWallet } from "@tonconnect/ui-react";
+import { sounds } from "../../lib/sounds";
+import { computeGameHash } from "../../lib/gameHash";
+import ResultScreen from "../components/ResultScreen";
 
 const CANVAS_WIDTH = 320;
 const CANVAS_HEIGHT = 500;
@@ -13,14 +16,6 @@ const STACK_START_Y = FLOOR_Y;
 const MIN_BLOCK_WIDTH = 20;
 const INITIAL_SPEED = 2.5;
 const SPEED_INCREMENT = 0.4;
-
-const CONFETTI = Array.from({ length: 24 }, (_, i) => ({
-  left: (i * 4.167) % 100,
-  delay: (i * 0.063) % 1.2,
-  color: ["#0098EA","#39C688","#FFA940","#FF5C5C","#A855F7","#F59E0B"][i % 6],
-  size: 6 + (i % 4) * 2,
-  dur: 1.5 + (i % 5) * 0.15,
-}));
 
 const haptic = {
   impact: (style: "light"|"medium"|"heavy" = "medium") =>
@@ -52,7 +47,6 @@ interface GameState {
 
 function GameContent() {
   const searchParams = useSearchParams();
-  const router = useRouter();
   const wallet = useTonWallet();
 
   const matchId = searchParams.get("matchId");
@@ -65,6 +59,7 @@ function GameContent() {
   const gameRef = useRef<GameState | null>(null);
   const rafRef = useRef<number>(0);
   const rngRef = useRef(makeSeededRandom(seed));
+  const movesRef = useRef<number[]>([]);  // track block widths for hash
 
   const [score, setScore] = useState(0);
   const [status, setStatus] = useState<"waiting" | "playing" | "finished">("waiting");
@@ -78,11 +73,13 @@ function GameContent() {
     prizeAmount: string;
     payoutTxHash?: string;
     betAmount?: number;
+    winStreak?: number;
   } | null>(null);
 
   const initGame = useCallback(() => {
     const rng = makeSeededRandom(seed);
     rngRef.current = rng;
+    movesRef.current = [];
     const baseBlock: Block = { x: (CANVAS_WIDTH - INITIAL_BLOCK_WIDTH) / 2, y: STACK_START_Y - BLOCK_HEIGHT, width: INITIAL_BLOCK_WIDTH };
     const firstBlock: Block = { x: 0, y: STACK_START_Y - BLOCK_HEIGHT * 2, width: INITIAL_BLOCK_WIDTH };
     gameRef.current = { stack: [baseBlock], current: firstBlock, direction: rng() > 0.5 ? 1 : -1, speed: INITIAL_SPEED, score: 0, status: "playing", cameraY: 0 };
@@ -165,14 +162,17 @@ function GameContent() {
       setFinalScore(g.score);
       setStatus("finished");
       haptic.error();
+      sounds.buzzer();
       return;
     }
 
     const placedBlock: Block = { x: leftEdge, y: topBlock.y - BLOCK_HEIGHT, width: overlap };
     g.stack.push(placedBlock);
+    movesRef.current.push(Math.round(overlap));
     g.score += 1;
     setScore(g.score);
     haptic.impact(overlap > 100 ? "medium" : "light");
+    sounds.thud();
     if (g.score % 5 === 0) g.speed += SPEED_INCREMENT;
 
     if (overlap < MIN_BLOCK_WIDTH) {
@@ -182,6 +182,7 @@ function GameContent() {
       setFinalScore(g.score);
       setStatus("finished");
       haptic.error();
+      sounds.buzzer();
       return;
     }
 
@@ -192,11 +193,13 @@ function GameContent() {
   const submitScore = useCallback(async (scoreToSubmit: number) => {
     if (!matchId || !playerAddress || submitting || submitted) return;
     setSubmitting(true);
+    const timestamp = Date.now();
+    const gameHash = await computeGameHash(seed, movesRef.current, scoreToSubmit, timestamp).catch(() => "");
     try {
       const res = await fetch("/api/match/score", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ matchId, playerAddress, score: scoreToSubmit, role }),
+        body: JSON.stringify({ matchId, playerAddress, score: scoreToSubmit, role, gameHash }),
       });
       const data = await res.json();
       setSubmitted(true);
@@ -206,7 +209,15 @@ function GameContent() {
         const matchData = await matchRes.json();
         const prizeAmount = Math.floor(Number(matchData.entryFee) * 2 * 0.9).toString();
         const isWin = matchData.winnerId === role;
-        if (isWin) haptic.success();
+        if (isWin) { haptic.success(); sounds.victory(); }
+        let winStreak = data.winStreak ?? 0;
+        if (isWin && playerAddress) {
+          try {
+            const sr = await fetch(`/api/profile/streak?address=${encodeURIComponent(playerAddress)}`);
+            const sd = await sr.json();
+            winStreak = sd.streak ?? winStreak;
+          } catch {}
+        }
         setMatchResult({
           winnerId: matchData.winnerId,
           player1Score: matchData.player1?.score ?? 0,
@@ -214,6 +225,7 @@ function GameContent() {
           prizeAmount,
           payoutTxHash: data.payoutTxHash,
           betAmount: matchData.betAmount,
+          winStreak,
         });
       }
     } catch (err) {
@@ -221,7 +233,7 @@ function GameContent() {
     } finally {
       setSubmitting(false);
     }
-  }, [matchId, playerAddress, submitting, submitted, role]);
+  }, [matchId, playerAddress, submitting, submitted, role, seed]);
 
   useEffect(() => {
     if (!submitted || matchResult || !matchId) return;
@@ -235,7 +247,7 @@ function GameContent() {
             ? Math.floor(Number(data.entryFee) * 2 * 0.9).toString()
             : "18000000";
           const isWin = data.winnerId === role;
-          if (isWin) haptic.success();
+          if (isWin) { haptic.success(); sounds.victory(); }
           setMatchResult({
             winnerId: data.winnerId,
             player1Score: data.player1?.score ?? 0,
@@ -243,6 +255,7 @@ function GameContent() {
             prizeAmount,
             payoutTxHash: data.payoutTxHash ?? undefined,
             betAmount: data.betAmount,
+            winStreak: 0,
           });
         }
       } catch (err) {
@@ -276,66 +289,19 @@ function GameContent() {
     const appUrl = process.env.NEXT_PUBLIC_APP_URL || "";
 
     return (
-      <div style={s.page}>
-        {isWinner && (
-          <div style={{ position:"fixed", top:0, left:0, width:"100%", height:"100%", pointerEvents:"none", overflow:"hidden", zIndex:10 }}>
-            {CONFETTI.map((p, i) => (
-              <div key={i} style={{ position:"absolute", left:`${p.left}%`, top:-20, width:p.size, height:p.size, background:p.color, borderRadius:2, animation:`confetti-fall ${p.dur}s ${p.delay}s ease-in both` }} />
-            ))}
-          </div>
-        )}
-        <div style={s.resultCard}>
-          <div style={{ fontSize:48, marginBottom:8 }}>
-            {isTie ? "🤝" : isWinner ? "🏆" : "😔"}
-          </div>
-          <div style={{ ...s.resultTitle, color: isTie ? "var(--warning)" : isWinner ? "var(--success)" : "var(--error)" }}>
-            {isTie ? "It's a Tie!" : isWinner ? "You Won!" : "You Lost"}
-          </div>
-          <div style={s.scoreRow}>
-            <div style={s.scoreBox}>
-              <div style={s.scoreLabel}>Your score</div>
-              <div style={s.scoreNum}>{myScore}</div>
-            </div>
-            <div style={{ fontSize:20, color:"var(--text-muted)", alignSelf:"center" }}>vs</div>
-            <div style={s.scoreBox}>
-              <div style={s.scoreLabel}>Opponent</div>
-              <div style={s.scoreNum}>{opponentScore}</div>
-            </div>
-          </div>
-          {isTie && (
-            <div style={s.prizeBox}>
-              <div style={{ fontSize:13, color:"var(--warning)" }}>🤝 Tie! Your entry fee will be refunded.</div>
-            </div>
-          )}
-          {isWinner && !isTie && (
-            <div style={s.prizeBox}>
-              <div style={{ fontSize:12, color:"var(--text-muted)", marginBottom:4 }}>Prize</div>
-              <div style={{ fontSize:22, fontWeight:700, color:"var(--success)", fontFamily:"var(--font-mono)" }}>
-                {prizeDisplay} BSA USD
-              </div>
-              {matchResult.payoutTxHash && (
-                <div style={{ fontSize:10, color:"var(--text-muted)", marginTop:4, fontFamily:"var(--font-mono)" }}>
-                  tx: {matchResult.payoutTxHash.slice(0, 20)}...
-                </div>
-              )}
-            </div>
-          )}
-          {isWinner && (
-            <button style={{ ...s.btn, background:"var(--bg-card)", border:"1px solid var(--border-active)", color:"var(--ton-blue)" }} onClick={() => {
-              const msg = `I just won ${prizeDisplay} BSA USD in Stack Duel! 🏆 Challenge me!`;
-              (window as any).Telegram?.WebApp?.openTelegramLink(`https://t.me/share/url?url=${encodeURIComponent(appUrl)}&text=${encodeURIComponent(msg)}`);
-            }}>
-              📤 Share Win
-            </button>
-          )}
-          <button style={s.btn} onClick={() => router.push(`/?presetMode=stack&presetBet=${matchResult.betAmount ?? 0.01}`)}>
-            ⚔️ Rematch
-          </button>
-          <button style={{ ...s.btn, background:"transparent", border:"1px solid var(--border)", color:"var(--text-secondary)" }} onClick={() => router.push("/")}>
-            Back to Lobby
-          </button>
-        </div>
-      </div>
+      <ResultScreen
+        isTie={isTie}
+        isWinner={isWinner}
+        myScore={myScore}
+        opponentScore={opponentScore}
+        prizeDisplay={prizeDisplay}
+        payoutTxHash={matchResult.payoutTxHash}
+        betAmount={matchResult.betAmount ?? 0.01}
+        mode="stack"
+        shareText={`I just won ${prizeDisplay} BSA USD in Stack Duel! 🏆 Challenge me!`}
+        appUrl={appUrl}
+        winStreak={matchResult.winStreak ?? 0}
+      />
     );
   }
 
@@ -407,11 +373,6 @@ const s: Record<string, React.CSSProperties> = {
   page: { minHeight:"100vh", background:"var(--bg)", display:"flex", alignItems:"center", justifyContent:"center", padding:16 },
   resultCard: { background:"var(--bg-card)", border:"1px solid var(--border)", borderRadius:16, padding:28, width:"100%", maxWidth:320, display:"flex", flexDirection:"column", alignItems:"center", textAlign:"center", gap:10 },
   resultTitle: { fontSize:26, fontWeight:700, color:"var(--text-primary)", fontFamily:"var(--font-sans)" },
-  scoreRow: { display:"flex", gap:20, alignItems:"center", margin:"8px 0" },
-  scoreBox: { background:"var(--bg)", border:"1px solid var(--border)", borderRadius:10, padding:"10px 20px", minWidth:80 },
-  scoreLabel: { fontSize:10, color:"var(--text-muted)", textTransform:"uppercase" as const, letterSpacing:"0.07em", marginBottom:4 },
-  scoreNum: { fontSize:28, fontWeight:700, color:"var(--text-primary)", fontFamily:"var(--font-mono)" },
-  prizeBox: { background:"rgba(57,198,136,0.08)", border:"1px solid rgba(57,198,136,0.25)", borderRadius:10, padding:"12px 20px", width:"100%" },
   btn: { width:"100%", padding:"13px 16px", background:"var(--ton-blue)", border:"none", borderRadius:10, color:"#fff", fontSize:15, fontWeight:600, fontFamily:"var(--font-sans)", cursor:"pointer" },
   scoreOverlay: { position:"absolute" as const, top:12, left:"50%", transform:"translateX(-50%)", fontSize:32, fontWeight:700, color:"rgba(255,255,255,0.9)", fontFamily:"var(--font-mono)", pointerEvents:"none" as const, textShadow:"0 2px 8px rgba(0,0,0,0.5)" },
   spinner: { width:28, height:28, border:"3px solid var(--border)", borderTopColor:"var(--ton-blue)", borderRadius:"50%", animation:"spin 0.8s linear infinite" },

@@ -81,7 +81,7 @@ async function recordMatchResult(
 
 export async function POST(request: Request) {
   try {
-    const { matchId, playerAddress, score, role } = await request.json();
+    const { matchId, playerAddress, score, role, gameHash } = await request.json();
 
     if (!matchId || !playerAddress || score === undefined) {
       return Response.json(
@@ -103,6 +103,11 @@ export async function POST(request: Request) {
       }
     }
 
+    // Store the client-side game hash for anti-cheat audit
+    if (gameHash && typeof gameHash === "string" && /^[0-9a-f]{64}$/i.test(gameHash)) {
+      redis.set(`gamehash:${matchId}:${role}`, gameHash, { ex: 3600 }).catch(() => {});
+    }
+
     const match = await submitScore(matchId, playerAddress, score, role);
 
     if (!match) {
@@ -121,6 +126,11 @@ export async function POST(request: Request) {
           await sendPayout(match.player1.address, match.entryFee);
           await sendPayout(match.player2!.address, match.entryFee);
           await setPayoutTx(matchId, "tie_refund");
+          // Reset streaks on tie
+          Promise.all([
+            redis.set(`streak:${match.player1.address.toLowerCase()}`, 0),
+            redis.set(`streak:${match.player2!.address.toLowerCase()}`, 0),
+          ]).catch(() => {});
           recordMatchResult(match, null, Number(match.entryFee)).catch(() => {});
         } catch (err: any) {
           console.error("[score] Tie refund failed:", err.message);
@@ -138,9 +148,16 @@ export async function POST(request: Request) {
         const txHash = await sendPayout(winnerAddress, prizeAmount);
         await setPayoutTx(matchId, txHash);
 
-        // Leaderboard + stats (fire-and-forget)
+        // Leaderboard + stats + streak (fire-and-forget)
         redis.zincrby("leaderboard", 1, winnerAddress).catch(() => {});
         recordMatchResult(match, winnerAddress, Number(prizeAmount)).catch(() => {});
+        const loserAddress = match.winnerId === "player1"
+          ? match.player2!.address
+          : match.player1.address;
+        const [newStreak] = await Promise.all([
+          redis.incr(`streak:${winnerAddress.toLowerCase()}`),
+          redis.set(`streak:${loserAddress.toLowerCase()}`, 0),
+        ]).catch(() => [1]);
 
         return Response.json({
           status: match.status,
@@ -149,6 +166,7 @@ export async function POST(request: Request) {
           prizeAmount,
           payoutTxHash: txHash,
           waiting: false,
+          winStreak: Number(newStreak ?? 1),
         });
       } catch (payoutErr: any) {
         console.error("[score] Payout failed:", payoutErr.message);
