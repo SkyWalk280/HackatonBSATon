@@ -241,7 +241,8 @@ function GameContent() {
   }, [initGame, tick]);
 
   if (matchResult) {
-    const isWinner = matchResult.winnerId === role;
+    const isTie = matchResult.winnerId === "tie";
+    const isWinner = !isTie && matchResult.winnerId === role;
     const myScore = role === "player1" ? matchResult.player1Score : matchResult.player2Score;
     const opponentScore = role === "player1" ? matchResult.player2Score : matchResult.player1Score;
     const prizeDisplay = (Number(matchResult.prizeAmount) / 1_000_000_000).toFixed(3);
@@ -249,9 +250,11 @@ function GameContent() {
     return (
       <div style={s.page}>
         <div style={s.resultCard}>
-          <div style={{ fontSize:48, marginBottom:8 }}>{isWinner ? "🏆" : "😔"}</div>
-          <div style={{ ...s.resultTitle, color: isWinner ? "var(--success)" : "var(--error)" }}>
-            {isWinner ? "You Won!" : "You Lost"}
+          <div style={{ fontSize:48, marginBottom:8 }}>
+            {isTie ? "🤝" : isWinner ? "🏆" : "😔"}
+          </div>
+          <div style={{ ...s.resultTitle, color: isTie ? "var(--warning)" : isWinner ? "var(--success)" : "var(--error)" }}>
+            {isTie ? "It's a Tie!" : isWinner ? "You Won!" : "You Lost"}
           </div>
           <div style={s.scoreRow}>
             <div style={s.scoreBox}>
@@ -264,7 +267,14 @@ function GameContent() {
               <div style={s.scoreNum}>{opponentScore}</div>
             </div>
           </div>
-          {isWinner && (
+          {isTie && (
+            <div style={s.prizeBox}>
+              <div style={{ fontSize:13, color:"var(--warning)" }}>
+                🤝 Tie! Your entry fee will be refunded.
+              </div>
+            </div>
+          )}
+          {isWinner && !isTie && (
             <div style={s.prizeBox}>
               <div style={{ fontSize:12, color:"var(--text-muted)", marginBottom:4 }}>Prize</div>
               <div style={{ fontSize:22, fontWeight:700, color:"var(--success)", fontFamily:"var(--font-mono)" }}>
@@ -335,7 +345,6 @@ function GameContent() {
   );
 }
 
-// Suspense wrapper required by Next.js 15 for useSearchParams
 export default function GamePage() {
   return (
     <Suspense fallback={

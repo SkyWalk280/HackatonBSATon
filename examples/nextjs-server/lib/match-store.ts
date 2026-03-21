@@ -95,12 +95,17 @@ export async function submitScore(
     return null;
   }
 
-  if (match.player1.finished && match.player2?.finished) {
-    match.status = "finished";
-    const p1 = match.player1.score ?? 0;
-    const p2 = match.player2.score ?? 0;
-    match.winnerId = p1 >= p2 ? "player1" : "player2";
+if (match.player1.finished && match.player2?.finished) {
+  match.status = "finished";
+  const p1 = match.player1.score ?? 0;
+  const p2 = match.player2.score ?? 0;
+  
+  if (p1 === p2) {
+    match.winnerId = "tie"; 
+  } else {
+    match.winnerId = p1 > p2 ? "player1" : "player2";
   }
+}
 
   await save(match);
   return match;
