@@ -143,51 +143,6 @@ telegram-miniapp/
             ├── gameHash.ts               SHA-256 game fingerprint via Web Crypto API
             └── tonDns.ts                 Resolve .ton DNS names via TON API
 ```
-
----
-
-## Key Features
-
-- **3 game modes** — Stack Duel, Memory Grid, Reaction Time; all seeded for fairness
-- **Variable bets** — 0.01 / 0.05 / 0.10 / 0.50 BSA USD selectable in the lobby
-- **Serverless-safe** — all match state in Redis; works across Vercel Lambda cold starts
-- **Match expiry** — 5-minute waiting timeout with live countdown; automatic P1 refund
-- **Rematch flow** — results screen → Rematch jumps straight to create-match with mode and bet pre-filled
-- **Public / private matches** — creator chooses visibility; private matches are invite-only (share the match ID); public matches appear in the open lobby
-- **Open lobby** — browse and join any public waiting match; live list refreshes every 5 seconds
-- **Live spectating** — anyone can open `/spectate/[matchId]` to watch a match in real time; polls every 2 s and shows each player's status, score, and the winner once both finish
-- **Player profiles** — `/profile/[address]` shows win/loss/tie record, total BSA USD earnings, favourite game mode, per-mode match counts, and best scores; accessible from leaderboard entries
-- **Global leaderboard** — Redis sorted set; top 10 by wins; shows display names when set; rows link to player profiles
-- **Display names** — players set a 2–20 char username stored in Redis, shown on leaderboard and spectate view
-- **Practice mode** — play any game free with no wallet, no bet, and no opponent; personal best per mode saved in `localStorage`; results screen shows count-up score, "New Personal Best!" badge, and a one-tap **Play for Real** shortcut
-- **Win streak + fire badge** — consecutive wins tracked in Redis; 🔥 badge shown on the results screen after 2+ in a row
-- **Double or nothing** — after a win the results screen offers a one-click escalation to the next bet tier (0.01→0.05, 0.05→0.10, 0.10→0.50)
-- **Animated results screen** — scores count up from 0 simultaneously, prize box reveals after count-up, action buttons stagger in; shared `ResultScreen` component across all three games
-- **Sound effects** — synthesised via Web Audio API (no asset files): block thud, tile ding, buzzer, victory jingle; plays on every game event
-- **Game hash (anti-cheat)** — client computes `SHA-256(seed | moves | score | timestamp)` via Web Crypto API and submits it with each score; server stores the hash for audit; labelled "verifiable gameplay"
-- **TON DNS** — wallet addresses resolved to `.ton` names via TON API; shown on leaderboard, spectate view, and player profiles as fallback display names
-- **Haptic feedback** — native Telegram WebApp haptics on every game action
-- **Win confetti** — pure CSS `@keyframes` confetti burst on victory (enhanced 30-piece multi-shape burst)
-- **Share win** — pre-filled Telegram share message with prize amount and app link
-- **Score anti-cheat** — server-side bounds validation per game mode before accepting scores
-- **Single-account testing** — no player address uniqueness check; one wallet can play both sides
-
----
-
-## Redis Data Model
-
-| Key pattern | Type | Content |
-|---|---|---|
-| `match:{id}` | String (JSON) | Full `Match` object, TTL 1 hour |
-| `matches:waiting` | Set | Match IDs currently in `waiting` status |
-| `leaderboard` | Sorted Set | member = wallet address, score = win count |
-| `username:{address}` | String | Display name for a wallet address |
-| `stats:{address}` | String (JSON) | Per-player stats: matchesPlayed, wins, losses, ties, totalEarningsNano, gameModeCounts, bestScores |
-| `streak:{address}` | Integer | Current consecutive win streak; reset to 0 on loss or tie |
-| `gamehash:{matchId}:{role}` | String | Client-side SHA-256 game fingerprint submitted with each score; TTL 1 hour |
-
----
-
 ## Running Locally
 
 ### Prerequisites
@@ -239,44 +194,6 @@ UPSTASH_REDIS_REST_TOKEN=your_token
 NEXT_PUBLIC_APP_URL=https://your-vercel-url.vercel.app
 NEXT_PUBLIC_TON_NETWORK=testnet
 ```
-
-### Testing Locally
-
-Open `http://localhost:3000` — the lobby.
-
-```bash
-# Create a match (skip payment gate for testing)
-curl -X POST http://localhost:3000/api/match/create \
-  -H "Content-Type: application/json" \
-  -d '{"playerAddress":"0:your_address","paymentBoc":"test","gameMode":"stack","betAmount":0.01}'
-
-# Poll match state
-curl http://localhost:3000/api/match/MATCHID
-
-# Join a match
-curl -X POST http://localhost:3000/api/match/join \
-  -H "Content-Type: application/json" \
-  -d '{"matchId":"MATCHID","playerAddress":"0:other_address","paymentBoc":"test"}'
-```
-
-> **Tip:** No address uniqueness check is enforced, so one wallet can create and join the same match for local testing.
-
----
-
-## Key Design Decisions
-
-**Why role-based scoring (`player1`/`player2`) instead of address-based?**
-Avoids ambiguity when testing with the same wallet and is more robust if two players somehow share an address.
-
-**Why seeded randomness?**
-Both players get the same seed from the server, generating identical conditions. The game is provably fair — neither player benefits from latency or timing.
-
-**Why x402 instead of a subscription?**
-x402 enables true pay-per-use — no accounts, no recurring charges. Entry fee collection is atomic with the game session.
-
-**Why Upstash Redis instead of a database?**
-Vercel serverless functions are stateless — an in-memory store is wiped between requests. Redis provides persistent shared state across all function instances with minimal setup and a generous free tier.
-
 ---
 
 ## Hackathon Context
