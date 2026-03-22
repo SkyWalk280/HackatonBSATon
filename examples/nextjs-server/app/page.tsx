@@ -371,6 +371,9 @@ function LobbyContent() {
               <button style={{ ...s.btn, ...s.btnGhost, flex:1, fontSize:13 }} onClick={() => router.push("/lobby")}>🏟️ Open Matches</button>
               <button style={{ ...s.btn, ...s.btnGhost, flex:1, fontSize:13 }} onClick={() => router.push("/leaderboard")}>🏆 Leaderboard</button>
             </div>
+            <button style={{ ...s.btn, ...s.btnGhost, fontSize:13 }} onClick={() => router.push("/practice")}>
+              🎯 Practice Mode
+            </button>
             {wallet?.account?.address && (
               <button style={{ ...s.btn, ...s.btnGhost, fontSize:13 }} onClick={() => router.push(`/profile/${encodeURIComponent(wallet.account.address)}`)}>
                 👤 My Profile

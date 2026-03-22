@@ -6,7 +6,7 @@ No accounts. No subscriptions. Just connect your wallet, pay to play, and win.
 
 ## Live Demo
 
-**Telegram Bot:** @HacaktonBsaTestBot (With stack-duel botpic) **P.S:** it is Hac**ak**ton (a typo during creation). The botpic and pictures were AI-generated.
+**Telegram Bot:** @HacaktonBsaTestBot (With stack-duel botpic) **P.S:** it is Hac**ak**ton spelling (a typo during creation). The botpic and pictures were AI-generated.
 
 **Vercel Deployment:** https://hackaton-bsa-testing-nextjs-server.vercel.app/
 

@@ -6,6 +6,7 @@ import { useTonWallet } from "@tonconnect/ui-react";
 import { sounds } from "../../lib/sounds";
 import { computeGameHash } from "../../lib/gameHash";
 import ResultScreen from "../components/ResultScreen";
+import PracticeResult from "../components/PracticeResult";
 
 const CANVAS_WIDTH = 320;
 const CANVAS_HEIGHT = 500;
@@ -54,6 +55,7 @@ function GameContent() {
   const seedParam = searchParams.get("seed");
   const seed = seedParam ? parseInt(seedParam) : Math.floor(Math.random() * 1_000_000);
   const role = searchParams.get("role") || "player1";
+  const isPractice = searchParams.get("practice") === "true";
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const gameRef = useRef<GameState | null>(null);
@@ -303,6 +305,10 @@ function GameContent() {
         winStreak={matchResult.winStreak ?? 0}
       />
     );
+  }
+
+  if (isPractice && status === "finished") {
+    return <PracticeResult mode="stack" score={finalScore} />;
   }
 
   if (status === "finished" && submitted && !matchResult) {

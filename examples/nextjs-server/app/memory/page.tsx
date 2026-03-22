@@ -6,6 +6,7 @@ import { useTonWallet } from "@tonconnect/ui-react";
 import { sounds } from "../../lib/sounds";
 import { computeGameHash } from "../../lib/gameHash";
 import ResultScreen from "../components/ResultScreen";
+import PracticeResult from "../components/PracticeResult";
 
 function makeSeededRandom(seed: number) {
   let s = seed;
@@ -64,6 +65,7 @@ function MemoryContent() {
   const seedParam = searchParams.get("seed");
   const seed = seedParam ? parseInt(seedParam) : Math.floor(Math.random() * 1_000_000);
   const role = searchParams.get("role") || "player1";
+  const isPractice = searchParams.get("practice") === "true";
 
   const [phase, setPhase] = useState<Phase>("waiting");
   const [round, setRound] = useState(0);
@@ -262,6 +264,10 @@ function MemoryContent() {
         winStreak={matchResult.winStreak ?? 0}
       />
     );
+  }
+
+  if (isPractice && phase === "finished") {
+    return <PracticeResult mode="memory" score={score} />;
   }
 
   if (phase === "finished" && submitted && !matchResult) {
