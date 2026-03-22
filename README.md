@@ -129,12 +129,14 @@ telegram-miniapp/
         │   ├── game/page.tsx             Stack Duel game (Canvas)
         │   ├── memory/page.tsx           Memory Grid game
         │   ├── reaction/page.tsx         Reaction Time game
+        │   ├── practice/page.tsx         Practice mode selector — play any game free, tracks personal bests
         │   ├── lobby/page.tsx            Open matches browser (public matches only)
         │   ├── leaderboard/page.tsx      Global leaderboard — top 10, clickable profiles
         │   ├── spectate/[matchId]/       Live match spectating — polls every 2s
         │   ├── profile/[address]/        Player profile — stats, win rate, best scores
         │   ├── components/
-        │   │   └── ResultScreen.tsx      Animated results screen (count-up, streak badge, double-or-nothing)
+        │   │   ├── ResultScreen.tsx      Animated results screen (count-up, streak badge, double-or-nothing)
+        │   │   └── PracticeResult.tsx    Practice result screen (count-up, personal best, play again)
         │   ├── hooks/usePayment.ts       x402 payment hook
         │   └── api/
         │       ├── match-entry/[bet]/    Payment gate — dynamic per bet amount
@@ -173,6 +175,7 @@ telegram-miniapp/
 - **Player profiles** — `/profile/[address]` shows win/loss/tie record, total BSA USD earnings, favourite game mode, per-mode match counts, and best scores; accessible from leaderboard entries
 - **Global leaderboard** — Redis sorted set; top 10 by wins; shows display names when set; rows link to player profiles
 - **Display names** — players set a 2–20 char username stored in Redis, shown on leaderboard and spectate view
+- **Practice mode** — play any game free with no wallet, no bet, and no opponent; personal best per mode saved in `localStorage`; results screen shows count-up score, "New Personal Best!" badge, and a one-tap **Play for Real** shortcut
 - **Win streak + fire badge** — consecutive wins tracked in Redis; 🔥 badge shown on the results screen after 2+ in a row
 - **Double or nothing** — after a win the results screen offers a one-click escalation to the next bet tier (0.01→0.05, 0.05→0.10, 0.10→0.50)
 - **Animated results screen** — scores count up from 0 simultaneously, prize box reveals after count-up, action buttons stagger in; shared `ResultScreen` component across all three games
