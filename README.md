@@ -4,7 +4,7 @@ A skill-based 1v1 Telegram Mini App built on TON, where two players bet BSA USD,
 
 No accounts. No subscriptions. Just connect your wallet, pay to play, and win.
 
-## Live Demo
+## Live Demo / Simply launch the bot and prepare your testet funds
 
 **Telegram Bot:** @HacaktonBsaTestBot (With stack-duel botpic) **P.S:** it is Hac**ak**ton spelling (a typo during creation). The botpic and pictures were AI-generated.
 
@@ -79,22 +79,6 @@ Player 2:  -bet BSA USD  (entry fee)
      Server sends 90% → winner (on-chain, immediate)
      Platform keeps 10% fee
 ```
-
----
-
-## x402 Protocol
-
-This app uses the **x402 pay-per-request** protocol for trustless entry-fee collection:
-
-1. Client calls a protected endpoint with no payment → server returns **HTTP 402**
-2. Client reads payment instructions from the 402 response body
-3. Client builds a Jetton transfer with a unique `queryId` comment
-4. TonConnect sends the transaction → user approves in Tonkeeper
-5. Client retries the endpoint with a `PAYMENT-SIGNATURE` header (base64 encoded BOC + metadata)
-6. Server calls `/api/facilitator/verify` (offline BOC check) → valid
-7. Server calls `/api/facilitator/settle` (polls chain for confirmation) → confirmed
-8. Server returns the protected resource
-
 ---
 
 ## Tech Stack
@@ -276,26 +260,6 @@ curl -X POST http://localhost:3000/api/match/join \
 ```
 
 > **Tip:** No address uniqueness check is enforced, so one wallet can create and join the same match for local testing.
-
----
-
-## Deploying to Vercel
-
-```bash
-git add . && git commit -m "Stack Duel" && git push
-# Connect repo to Vercel, set root directory to: examples/nextjs-server
-# Add all env vars in Vercel dashboard → Deploy
-```
-
-Or via CLI (from `examples/nextjs-server`):
-
-```bash
-vercel --prod
-```
-
-The `vercel-build` script installs the pnpm workspace and builds all packages automatically.
-
-> **Important:** Redis is required. The app will not work without valid `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`.
 
 ---
 
